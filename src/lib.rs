@@ -7,5 +7,6 @@ pub mod runtime;
 mod test;
 pub mod utils;
 
+#[cfg(feature = "adapter")]
 pub mod adapter;
 pub mod prelude;

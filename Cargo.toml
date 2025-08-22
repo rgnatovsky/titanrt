@@ -31,3 +31,6 @@ criterion = "0.7.0"
 [[bench]]
 name = "runtime_hot_loop"
 harness = false
+
+[features]
+adapter = []
