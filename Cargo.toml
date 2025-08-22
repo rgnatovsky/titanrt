@@ -9,7 +9,7 @@ repository = "https://github.com/rgnatovsky/reacton"
 documentation = "https://docs.rs/reacton"
 keywords = ["reactive", "runtime", "hft", "streams", "trading"]
 categories = ["concurrency", "data-structures", "network-programming"]
-
+readme = "README.md"
 
 [dependencies]
 ringbuf = { version = "0.4.8" }
