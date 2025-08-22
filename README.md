@@ -66,6 +66,8 @@ Your application logic implements `BaseModel` and **owns** the connector/stream 
   Create connectors, spawn streams, keep their handles.
 * `execute()`
   Hot loop. Drain event receivers from owned streams, translate/publish state, emit outputs, push actions if needed.
+* `on_event(event)`
+  Handle events from outer streams through control plane.
 * `stop(kind)`
   Cooperatively stop streams (cancel + join) and clean up.
 * Optional: `hot_reload(&Config)`, `json_command(Value)`.
