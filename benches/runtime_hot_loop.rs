@@ -1,14 +1,14 @@
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
-use reactos::io::mpmc::MpmcChannel;
-use reactos::prelude::{
+use serde::{Deserialize, Serialize};
+use titanrt::io::mpmc::MpmcChannel;
+use titanrt::prelude::{
     BaseModel, BaseRx, BaseTx, ExecutionResult, NullEvent, NullModelCtx, Runtime, RuntimeConfig,
     StopKind, StopState,
 };
-use reactos::utils::CancelToken;
-use serde::{Deserialize, Serialize};
+use titanrt::utils::CancelToken;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct HotCfg {
@@ -22,13 +22,13 @@ enum TestOut {
 
 struct HotModel {
     left: u64,
-    done_tx: reactos::io::mpmc::MpmcSender<TestOut>,
+    done_tx: titanrt::io::mpmc::MpmcSender<TestOut>,
     _cancel: CancelToken,
 }
 
 impl BaseModel for HotModel {
     type Config = HotCfg;
-    type OutputTx = reactos::io::mpmc::MpmcSender<TestOut>;
+    type OutputTx = titanrt::io::mpmc::MpmcSender<TestOut>;
     type Event = NullEvent;
     type Ctx = NullModelCtx;
 

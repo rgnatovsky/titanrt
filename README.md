@@ -1,15 +1,15 @@
-# Reactos
+# TitanRt
 
 Typed reactive runtime for real-time systems.
 
-**Reactos** is a *model-first* reactive runtime. Your **model** owns and controls **connectors** and their **streams** (
+**TitanRt** is a *model-first* reactive runtime. Your **model** owns and controls **connectors** and their **streams** (
 workers). Streams produce strongly-typed events; the model pulls and handles them inside its execution loop. The runtime
 provides lifecycle orchestration, back-pressure, cooperative cancellation, and optional CPU core pinning. The **control
 plane** is for commands; the **event plane** lives inside the model via its embedded connectors.
 
-* Crate: `reactos`
+* Crate: `titanrt`
 * License: MIT OR Apache-2.0
-* Docs: `https://docs.rs/reactos`
+* Docs: `https://docs.rs/titanrt`
 
 ---
 
@@ -101,13 +101,13 @@ The stream forwards every “action” as a typed event; the model drains those 
 use anyhow::Result;
 use serde::Deserialize;
 
-// --- Reactos imports (names may be re-exported in your crate layout)
-use reactos::adapter::*;
-use reactos::io::mpmc::{MpmcSender, MpmcReceiver};
-use reactos::io::base::{BaseTx, TxPairExt};
-use reactos::model::{BaseModel, ExecutionResult, StopKind, StopState};
-use reactos::runtime::{Runtime, RuntimeConfig};
-use reactos::utils::CancelToken;
+// --- TitanRt imports (names may be re-exported in your crate layout)
+use titanrt::adapter::*;
+use titanrt::io::mpmc::{MpmcSender, MpmcReceiver};
+use titanrt::io::base::{BaseTx, TxPairExt};
+use titanrt::model::{BaseModel, ExecutionResult, StopKind, StopState};
+use titanrt::runtime::{Runtime, RuntimeConfig};
+use titanrt::utils::CancelToken;
 
 // 1) A small descriptor for an "echo" stream
 #[derive(Debug, Clone)]
@@ -170,7 +170,7 @@ struct MyModel {
       // The returned Stream type from spawn_stream; use concrete type in your codebase.
       // For README, we keep it inferred via `let echo = ...?; self.echo = Some(echo);`
       // so the example stays transport-agnostic.
-      // e.g.: reactos::adapter::Stream<EchoDesc, MpmcSender<String>, ()>
+      // e.g.: titanrt::adapter::Stream<EchoDesc, MpmcSender<String>, ()>
       // (type depends on your crate’s exact definitions)
       Box<dyn std::any::Any> // placeholder for README; use concrete type in real code
    >,
@@ -272,7 +272,7 @@ fn main() -> Result<()> {
    )?;
 
    // Control-plane is for lifecycle commands only:
-   use reactos::control::inputs::{Input, CommandInput};
+   use titanrt::control::inputs::{Input, CommandInput};
    let _ = rt.control_tx().try_send(Input::Command(CommandInput::Shutdown));
 
    rt.run_blocking()?;

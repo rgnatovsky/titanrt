@@ -7,7 +7,6 @@ use crate::model::{BaseModel, ExecutionResult, StopKind};
 use crate::utils::try_pin_core;
 use crate::utils::CancelToken;
 use anyhow::{anyhow, Result};
-
 use signal_hook::consts::TERM_SIGNALS;
 use signal_hook::flag;
 use std::marker::PhantomData;
