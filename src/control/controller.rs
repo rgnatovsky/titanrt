@@ -1,0 +1,220 @@
+use crate::control::inputs::{CommandInput, Input};
+use crate::control::policy::{NoModel, Policy, WithModel};
+use crate::error::TryRecvError;
+use crate::io::base::BaseRx;
+use crate::io::ringbuffer::RingReceiver;
+use crate::model::{BaseModel, StopKind, StopState};
+use crate::utils::CancelToken;
+use serde_json::Value;
+use std::ops::ControlFlow;
+use std::thread;
+use std::time::Duration;
+
+#[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
+pub enum ControllerResult {
+    Empty,
+    Processed,
+    InitModel,
+    Disconnected,
+}
+
+pub struct Controller<M: BaseModel> {
+    control_rx: RingReceiver<Input<M::Event>>,
+}
+
+impl<M: BaseModel> Controller<M> {
+    pub fn new(control_rx: RingReceiver<Input<M::Event>>) -> Self {
+        Self { control_rx }
+    }
+
+    #[inline(always)]
+    pub fn drain_inputs(
+        &mut self,
+        max: usize,
+        maybe_model: Option<&mut M>,
+        model_cfg: &mut M::Config,
+        cancel: &CancelToken,
+        stop_timeout_secs: u64,
+    ) -> ControllerResult {
+        let inp = match self.control_rx.try_recv() {
+            Ok(inp) => inp,
+            Err(TryRecvError::Empty) => return ControllerResult::Empty,
+            Err(TryRecvError::Disconnected) => return ControllerResult::Disconnected,
+        };
+
+        match maybe_model {
+            Some(model) => {
+                let mut with = WithModel {
+                    model,
+                    cfg: model_cfg,
+                    cancel,
+                    stop_timeout_secs,
+                };
+                match Self::handle_with_model(inp, &mut with) {
+                    ControlFlow::Continue(()) => (),
+                    ControlFlow::Break(r) => return r,
+                }
+                self.drain_loop(max, with)
+            }
+            None => {
+                match Self::handle_no_model(inp, model_cfg) {
+                    ControlFlow::Continue(()) => (),
+                    ControlFlow::Break(r) => return r,
+                };
+                self.drain_loop(max, NoModel::<M> { c: model_cfg })
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn drain_loop<P: Policy<M::Event>>(&mut self, max: usize, mut policy: P) -> ControllerResult {
+        for _ in 1..max {
+            match self.control_rx.try_recv() {
+                Ok(inp) => {
+                    if let ControlFlow::Break(r) = policy.handle(inp) {
+                        return r;
+                    }
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => return ControllerResult::Disconnected,
+            }
+        }
+
+        ControllerResult::Processed
+    }
+
+    #[inline(always)]
+    pub(super) fn handle_no_model(
+        input: Input<M::Event>,
+        model_cfg: &mut M::Config,
+    ) -> ControlFlow<ControllerResult> {
+        match input {
+            Input::Command(cmd) => {
+                match cmd {
+                    // Нет модели — Start/Restart означает "инициализируй модель"
+                    CommandInput::Start | CommandInput::Restart => {
+                        ControlFlow::Break(ControllerResult::InitModel)
+                    }
+
+                    // Управляющие «жёсткие» сигналы — выходим наружу
+                    CommandInput::Shutdown | CommandInput::Kill => {
+                        ControlFlow::Break(ControllerResult::Disconnected)
+                    }
+
+                    // Остальное без модели игнорируем (или можешь логировать по вкусу)
+                    CommandInput::Stop | CommandInput::Json(_) => {
+                        tracing::warn!(
+                            "[TradingRuntime] ignoring command input without model: {:?}",
+                            cmd
+                        );
+                        ControlFlow::Continue(())
+                    }
+                    CommandInput::HotReload(v) => {
+                        Self::hot_reload(None, model_cfg, v);
+                        ControlFlow::Continue(())
+                    }
+                }
+            }
+            Input::Event(_) => ControlFlow::Continue(()),
+        }
+    }
+
+    #[inline(always)]
+    pub(super) fn handle_with_model(
+        input: Input<M::Event>,
+        with: &mut WithModel<M>,
+    ) -> ControlFlow<ControllerResult> {
+        match input {
+            Input::Command(cmd) => {
+                match cmd {
+                    CommandInput::Start => {
+                        tracing::info!(
+                            "[TradingRuntime] ignoring start signal - model already running"
+                        );
+                        ControlFlow::Continue(())
+                    }
+                    CommandInput::Stop => {
+                        tracing::info!("[TradingRuntime] stop signal received");
+                        Self::stop_model(with.model, StopKind::Stop, with.stop_timeout_secs);
+                        ControlFlow::Continue(())
+                    }
+                    CommandInput::Restart => {
+                        tracing::info!("[TradingRuntime] restart signal received");
+                        Self::stop_model(with.model, StopKind::Restart, with.stop_timeout_secs);
+                        // Выйдем наружу — пусть внешний код создаст новую модель
+                        ControlFlow::Break(ControllerResult::InitModel)
+                    }
+                    CommandInput::Shutdown => {
+                        tracing::info!("[TradingRuntime] shutdown signal received");
+                        Self::stop_model(with.model, StopKind::Shutdown, with.stop_timeout_secs);
+                        ControlFlow::Break(ControllerResult::Disconnected)
+                    }
+                    CommandInput::Kill => {
+                        tracing::info!("[TradingRuntime] kill signal received");
+                        with.cancel.cancel();
+                        ControlFlow::Break(ControllerResult::Disconnected)
+                    }
+                    CommandInput::HotReload(v) => {
+                        Self::hot_reload(Some(with.model), with.cfg, v);
+                        ControlFlow::Continue(())
+                    }
+                    CommandInput::Json(v) => {
+                        if let Err(e) = with.model.json_command(v) {
+                            tracing::error!("[TradingRuntime] model json command error: {e}");
+                        }
+                        ControlFlow::Continue(())
+                    }
+                }
+            }
+            Input::Event(e) => {
+                with.model.on_event(e);
+
+                ControlFlow::Continue(())
+            }
+        }
+    }
+
+    pub(crate) fn hot_reload(model: Option<&mut M>, model_cfg: &mut M::Config, raw_value: Value) {
+        match serde_json::from_value::<M::Config>(raw_value) {
+            Ok(new_config) => {
+                if let Some(model) = model {
+                    match model.hot_reload(&new_config) {
+                        Ok(()) => {
+                            *model_cfg = new_config;
+                        }
+                        Err(e) => {
+                            tracing::error!("[TradingRuntime] model hot reload error: {}", e);
+                        }
+                    };
+                } else {
+                    *model_cfg = new_config;
+                }
+            }
+            Err(e) => {
+                tracing::error!("[TradingRuntime] hot reload parsing error: {}", e);
+            }
+        }
+    }
+
+    pub(crate) fn stop_model(model: &mut M, stop_kind: StopKind, timeout_sec: u64) {
+        let start = std::time::Instant::now();
+        let mut by_timeout = false;
+
+        while model.stop(stop_kind) == StopState::InProgress {
+            thread::sleep(Duration::from_millis(100));
+            if start.elapsed().as_secs() > timeout_sec {
+                by_timeout = true;
+                break;
+            }
+        }
+
+        tracing::info!(
+            "[TradingRuntime] model stopped {}",
+            if by_timeout {
+                "by timeout"
+            } else {
+                "as normal"
+            }
+        );
+    }
+}

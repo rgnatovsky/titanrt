@@ -1,0 +1,32 @@
+[package]
+name = "reacton"
+version = "0.1.0"
+edition = "2024"
+authors = ["Ruslan Gnatovsky <rgnatovsky@gmail.com>"]
+description = "Typed reactive runtime for real-time systems"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/rgnatovsky/reacton"
+documentation = "https://docs.rs/reacton"
+keywords = ["reactive", "runtime", "hft", "streams", "trading"]
+categories = ["concurrency", "data-structures", "network-programming"]
+
+
+[dependencies]
+ringbuf = { version = "0.4.8" }
+anyhow = "1.0.98"
+arc-swap = "1.7.1"
+core_affinity = "0.8.3"
+crossbeam = "0.8.4"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.142"
+tracing = "0.1.41"
+uuid = { version = "1.17.0", features = ["serde", "v4"] }
+ahash = "0.8.12"
+signal-hook = "0.3.18"
+
+[dev-dependencies]
+criterion = "0.7.0"
+
+[[bench]]
+name = "runtime_hot_loop"
+harness = false
