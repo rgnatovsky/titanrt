@@ -2,12 +2,12 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
-use reacton::io::mpmc::MpmcChannel;
-use reacton::prelude::{
+use reactos::io::mpmc::MpmcChannel;
+use reactos::prelude::{
     BaseModel, BaseRx, BaseTx, ExecutionResult, NullEvent, NullModelCtx, Runtime, RuntimeConfig,
     StopKind, StopState,
 };
-use reacton::utils::CancelToken;
+use reactos::utils::CancelToken;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,13 +22,13 @@ enum TestOut {
 
 struct HotModel {
     left: u64,
-    done_tx: reacton::io::mpmc::MpmcSender<TestOut>,
+    done_tx: reactos::io::mpmc::MpmcSender<TestOut>,
     _cancel: CancelToken,
 }
 
 impl BaseModel for HotModel {
     type Config = HotCfg;
-    type OutputTx = reacton::io::mpmc::MpmcSender<TestOut>;
+    type OutputTx = reactos::io::mpmc::MpmcSender<TestOut>;
     type Event = NullEvent;
     type Ctx = NullModelCtx;
 

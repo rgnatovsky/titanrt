@@ -1,12 +1,12 @@
 [package]
-name = "reacton"
+name = "reactos"
 version = "0.1.0"
 edition = "2024"
 authors = ["Ruslan Gnatovsky <rgnatovsky@gmail.com>"]
 description = "Typed reactive runtime for real-time systems"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/rgnatovsky/reacton"
-documentation = "https://docs.rs/reacton"
+repository = "https://github.com/rgnatovsky/reactos"
+documentation = "https://docs.rs/reactos"
 keywords = ["reactive", "runtime", "hft", "streams", "trading"]
 categories = ["concurrency", "data-structures", "network-programming"]
 readme = "README.md"
