@@ -3,12 +3,16 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// Internal cancellation state, shared via [`Arc`].
+/// Each state may optionally have a parent, so that
+/// cancelling a parent cancels all of its descendants.
 struct CancelState {
    cancelled: AtomicBool,
    parent: Option<Arc<CancelState>>,
 }
 
 impl CancelState {
+   /// Create a root state (no parent).
    #[inline]
    fn new_root() -> Arc<Self> {
       Arc::new(Self {
@@ -17,6 +21,7 @@ impl CancelState {
       })
    }
 
+   /// Create a child state linked to a parent.
    #[inline]
    fn child_of(parent: Arc<CancelState>) -> Arc<Self> {
       Arc::new(Self {
@@ -25,18 +30,20 @@ impl CancelState {
       })
    }
 
+   /// Mark this state as cancelled.
    #[inline]
    fn cancel(&self) {
-      // SeqCst для наглядности; можно Relaxed/Release в ultra‑HFT, если согласуешь модель.
+      // Relaxed is enough for visibility in this simple model;
+      // use stronger ordering if you need cross-thread guarantees.
       self.cancelled.store(true, Ordering::Relaxed);
    }
 
+   /// Check whether this or any ancestor has been cancelled.
    #[inline]
    fn is_cancelled(&self) -> bool {
       if self.cancelled.load(Ordering::Relaxed) {
          return true;
       }
-      // Хвостовая рекурсия по родителям очень короткая в реальности.
       if let Some(ref p) = self.parent {
          return p.is_cancelled();
       }
@@ -44,6 +51,10 @@ impl CancelState {
    }
 }
 
+/// Hierarchical cancellation token.
+///
+/// A `CancelToken` can be cloned cheaply and checked at any time.
+/// Cancelling a parent token cancels all of its children.
 #[derive(Clone)]
 pub struct CancelToken {
    state: Arc<CancelState>,
@@ -51,13 +62,14 @@ pub struct CancelToken {
 
 impl Debug for CancelToken {
    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-      f.debug_struct("StdCancelToken")
+      f.debug_struct("CancelToken")
        .field("is_cancelled", &self.is_cancelled())
        .finish()
    }
 }
 
 impl CancelToken {
+   /// Create a new root cancellation token.
    #[inline]
    pub fn new_root() -> Self {
       Self {
@@ -65,16 +77,19 @@ impl CancelToken {
       }
    }
 
+   /// Cancel this token (and propagate to all children).
    #[inline]
    pub fn cancel(&self) {
       self.state.cancel();
    }
 
+   /// Check if this token (or any ancestor) has been cancelled.
    #[inline]
    pub fn is_cancelled(&self) -> bool {
       self.state.is_cancelled()
    }
 
+   /// Create a new child token linked to this one.
    #[inline]
    pub fn new_child(&self) -> Self {
       Self {

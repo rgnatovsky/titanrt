@@ -2,14 +2,23 @@ use crate::error::{RecvError, SendError, TryRecvError};
 use crate::utils::CancelToken;
 use std::time::Duration;
 
+/// Marker trait for transport TX halves.
 pub trait TxMarker {}
+
+/// Marker trait for transport RX halves.
 pub trait RxMarker {}
 
+/// Base trait for sending typed events.
+///
+/// Implemented by channel senders (TX half).
 pub trait BaseTx: Send + 'static {
+    /// Event type carried by this transport.
     type EventType: Send + 'static;
 
+    /// Non-blocking send. Returns `Err` if the channel is full or disconnected.
     fn try_send(&mut self, a: Self::EventType) -> Result<(), SendError<Self::EventType>>;
 
+    /// Blocking/cooperative send with optional timeout and cancellation.
     fn send(
         &mut self,
         a: Self::EventType,
@@ -18,17 +27,24 @@ pub trait BaseTx: Send + 'static {
     ) -> Result<(), SendError<Self::EventType>>;
 }
 
+/// Base trait for receiving typed events.
+///
+/// Implemented by channel receivers (RX half).
 pub trait BaseRx: Send + 'static {
+    /// Event type carried by this transport.
     type EventType: Send + 'static;
 
+    /// Non-blocking receive. Returns `Empty` if no data, `Disconnected` if channel closed.
     fn try_recv(&mut self) -> Result<Self::EventType, TryRecvError>;
 
+    /// Blocking/cooperative receive with optional timeout and cancellation.
     fn recv(
         &mut self,
         cancel: &CancelToken,
         timeout: Option<Duration>,
     ) -> Result<Self::EventType, RecvError>;
 
+    /// Drain up to `max` events from the channel (default cap 64).
     fn drain(&mut self, max: usize) -> Vec<Self::EventType> {
         let max = max.min(64);
         let mut out = Vec::with_capacity(max);
@@ -43,27 +59,39 @@ pub trait BaseRx: Send + 'static {
         out
     }
 
+    /// Drain all currently available events.
     fn drain_max(&mut self) -> Vec<Self::EventType> {
         self.drain(usize::MAX)
     }
 }
 
+/// Extension for RX halves that can create paired TX halves.
 pub trait RxPairExt: BaseRx + Sized {
     type TxHalf: BaseTx<EventType = Self::EventType>;
+
+    /// Create a bounded channel with given capacity.
     fn bound(cap: usize) -> (Self::TxHalf, Self);
 
+    /// Create an unbounded channel.
     fn unbound() -> (Self::TxHalf, Self);
 }
 
+/// Extension for TX halves that can create paired RX halves.
 pub trait TxPairExt: BaseTx + Sized {
     type RxHalf: BaseRx<EventType = Self::EventType>;
+
+    /// Create a bounded channel with given capacity.
     fn bound(cap: usize) -> (Self, Self::RxHalf);
+
+    /// Create an unbounded channel.
     fn unbound() -> (Self, Self::RxHalf);
 }
 
+/// No-op sender for unit type.
 #[derive(Clone, Debug, Default)]
 pub struct NullTx;
 
+/// No-op receiver for unit type.
 #[derive(Clone, Debug, Default)]
 pub struct NullRx;
 
@@ -102,6 +130,7 @@ impl BaseRx for NullRx {
     fn drain(&mut self, _max: usize) -> Vec<Self::EventType> {
         Vec::new()
     }
+
     fn drain_max(&mut self) -> Vec<Self::EventType> {
         Vec::new()
     }
@@ -125,6 +154,7 @@ impl TxPairExt for NullTx {
     fn bound(_cap: usize) -> (Self, Self::RxHalf) {
         (NullTx, NullRx)
     }
+
     fn unbound() -> (Self, Self::RxHalf) {
         (NullTx, NullRx)
     }

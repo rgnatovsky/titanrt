@@ -1,33 +1,45 @@
 use crate::adapter::errors::StreamResult;
 use crate::adapter::StreamDescriptor;
-
 use crate::io::base::{BaseTx, TxPairExt};
 use crate::utils::*;
 use std::sync::Arc;
 
+/// Runtime context passed to a spawned stream worker.
+///
+/// Bundles together the descriptor, config, typed channels,
+/// shared state, cancel token, and health flag. This is the
+/// handle a [`StreamRunner`] implementation uses inside `run()`.
 pub struct RuntimeCtx<D, R, E, S>
-where
-    D: StreamDescriptor,
-    R: StreamRunner<D, E, S>,
-    S: StateMarker,
-    E: BaseTx,
+    where
+       D: StreamDescriptor,
+       R: StreamRunner<D, E, S>,
+       S: StateMarker,
+       E: BaseTx,
 {
+    /// Stream descriptor (venue, kind, bounds, policy).
     pub desc: D,
+    /// Per-stream config built by the runner.
     pub cfg: R::Config,
+    /// Shared state snapshot cell.
     pub state: Arc<StateCell<S>>,
+    /// Channel for actions coming from the model/user.
     pub action_rx: <R::ActionTx as TxPairExt>::RxHalf,
+    /// Channel for events going back to the model/user.
     pub event_tx: E,
+    /// Cancellation token (child of connector/runtime root).
     pub cancel: CancelToken,
+    /// Health flag of this worker.
     pub health: HealthFlag,
 }
 
 impl<D, R, E, S> RuntimeCtx<D, R, E, S>
-where
-    D: StreamDescriptor,
-    R: StreamRunner<D, E, S>,
-    S: StateMarker,
-    E: BaseTx,
+    where
+       D: StreamDescriptor,
+       R: StreamRunner<D, E, S>,
+       S: StateMarker,
+       E: BaseTx,
 {
+    /// Construct a new runtime context.
     #[inline]
     pub fn new(
         ctx: R::Config,
@@ -50,18 +62,28 @@ where
     }
 }
 
+/// Trait for stream workers owned by a connector.
+///
+/// A `StreamRunner` defines how to build a per-stream config
+/// and how to run the worker loop given a [`RuntimeCtx`].
 pub trait StreamRunner<D, E, S>: Sized + Send + 'static
-where
-    D: StreamDescriptor,
-    S: StateMarker,
-    E: BaseTx,
+    where
+       D: StreamDescriptor,
+       S: StateMarker,
+       E: BaseTx,
 {
+    /// Config type built from the descriptor (passed into the context).
     type Config: Send + 'static;
+    /// Actions channel TX half (model → worker).
     type ActionTx: BaseTx + TxPairExt;
+    /// Raw events produced inside the worker loop.
     type RawEvent: Send + 'static;
+    /// Hook to translate raw events into typed events/state updates.
     type Hook: Fn(&Self::RawEvent, &mut E, &StateCell<S>) + Send + 'static;
 
+    /// Build a per-stream config from the descriptor.
     fn build_config(&mut self, desc: &D) -> anyhow::Result<Self::Config>;
 
+    /// Run the worker loop with the given context and event hook.
     fn run(ctx: RuntimeCtx<D, Self, E, S>, hook: Self::Hook) -> StreamResult<()>;
 }

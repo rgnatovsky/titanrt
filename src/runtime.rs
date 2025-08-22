@@ -15,27 +15,33 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::{hint::spin_loop, thread, time::Duration};
 
+/// Runtime wraps a model in a dedicated control thread.
+/// It manages lifecycle, control-plane inputs, cancellation, and OS termination signals.
 pub struct Runtime<Model: BaseModel> {
+    /// Sender for control-plane inputs (events/commands).
     control_tx: RingSender<Input<Model::Event>>,
+    /// Handle of the spawned control thread.
     join: Option<thread::JoinHandle<()>>,
     _phantom_data: PhantomData<Model>,
 }
 
 impl<Model: BaseModel> Runtime<Model> {
+    /// Returns a mutable reference to the control-plane sender.
     pub fn control_tx(&mut self) -> &mut RingSender<Input<Model::Event>> {
         &mut self.control_tx
     }
 
+    /// Blocks until the runtime thread finishes.
     pub fn run_blocking(mut self) -> Result<()> {
         if let Some(trading_loop) = self.join.take() {
             let _ = trading_loop.join();
         } else {
             return Err(anyhow!("trading_loop is None"));
         }
-
         Ok(())
     }
 
+    /// Requests shutdown and waits for the thread to end.
     pub fn shutdown(mut self) {
         if let Some(join) = self.join.take() {
             self.control_tx
@@ -45,10 +51,12 @@ impl<Model: BaseModel> Runtime<Model> {
         }
     }
 
+    /// Wraps the runtime into a guard that auto-shuts down on drop.
     pub fn into_guard(self) -> RuntimeGuard<Model> {
         RuntimeGuard(Some(self))
     }
 
+    /// Spawns the runtime and blocks until it ends.
     pub fn spawn_blocking(
         cfg: RuntimeConfig,
         model_ctx: Model::Ctx,
@@ -56,14 +64,13 @@ impl<Model: BaseModel> Runtime<Model> {
         output_tx: Model::OutputTx,
     ) -> Result<()> {
         let mut rt = Self::spawn(cfg, model_ctx, model_cfg, output_tx)?;
-
         if let Some(join) = rt.join.take() {
             let _ = join.join();
         }
-
         Ok(())
     }
 
+    /// Spawns the runtime thread that drives the model lifecycle.
     pub fn spawn(
         cfg: RuntimeConfig,
         ctx: Model::Ctx,
@@ -77,12 +84,13 @@ impl<Model: BaseModel> Runtime<Model> {
         let (control_tx, control_rx) = RingBuffer::bounded(max_inputs_pending);
 
         let join = thread::spawn(move || {
+            // Termination flag from OS signals
             let term_flag = Arc::new(AtomicBool::new(false));
-
             for sig in TERM_SIGNALS {
                 let _ = flag::register(*sig, term_flag.clone());
             }
 
+            // Pin to a specific core if requested
             let core_id = if let Some(core_id) = cfg.core_id {
                 match try_pin_core(core_id) {
                     Ok(core_id) => {
@@ -99,12 +107,11 @@ impl<Model: BaseModel> Runtime<Model> {
             };
 
             let mut controller = Controller::new(control_rx);
-
             let cancel_token = CancelToken::new_root();
 
+            // Optionally initialize the model at start
             let mut maybe_model: Option<Model> = if cfg.init_model_on_start {
                 let model_cfg_clone = model_cfg.clone();
-
                 match Model::initialize(
                     ctx.clone(),
                     model_cfg_clone,
@@ -125,18 +132,17 @@ impl<Model: BaseModel> Runtime<Model> {
             let mut idle: u32 = 0;
 
             loop {
+                // Handle termination signals
                 if term_flag.load(Ordering::Relaxed) {
                     tracing::warn!("[TradingRuntime] termination signal received");
-
                     if let Some(ref mut model) = maybe_model {
                         Controller::stop_model(model, StopKind::Shutdown, stop_model_timeout);
                     }
-
                     cancel_token.cancel();
-
                     break;
                 }
 
+                // Drain control-plane inputs
                 match controller.drain_inputs(
                     max_inputs_drain,
                     maybe_model.as_mut(),
@@ -145,16 +151,13 @@ impl<Model: BaseModel> Runtime<Model> {
                     stop_model_timeout,
                 ) {
                     ControllerResult::Empty => {}
-                    ControllerResult::Processed => {
-                        idle = 0;
-                    }
+                    ControllerResult::Processed => idle = 0,
                     ControllerResult::Disconnected => {
                         tracing::error!("[TradingRuntime] control disconnected");
                         break;
                     }
                     ControllerResult::InitModel => {
                         tracing::info!("[TradingRuntime] model init");
-
                         maybe_model = match Model::initialize(
                             ctx.clone(),
                             model_cfg.clone(),
@@ -168,44 +171,36 @@ impl<Model: BaseModel> Runtime<Model> {
                                 None
                             }
                         };
-
                         idle = 0;
                     }
                 }
 
+                // Drive the model if present
                 match maybe_model {
                     None => thread::sleep(Duration::from_micros(100)),
-                    Some(ref mut model) => {
-                        match model.execute() {
-                            ExecutionResult::Continue => {
-                                idle = 0;
-                            }
-                            ExecutionResult::Relax => {
-                                idle = idle.saturating_add(1);
-                                if idle < 64 {
-                                    spin_loop(); // ~наносекунды
-                                } else if idle < 256 {
-                                    thread::yield_now();
-                                } else {
-                                    thread::sleep(Duration::from_micros(2));
-                                }
-                            }
-                            ExecutionResult::Stop => {
-                                tracing::info!("[TradingRuntime] model.execute stopped by itself");
-                                Controller::stop_model(model, StopKind::Stop, stop_model_timeout);
-                                maybe_model = None;
-                            }
-                            ExecutionResult::Shutdown => {
-                                tracing::info!("[TradingRuntime] model.execute shutdown by itself");
-                                Controller::stop_model(
-                                    model,
-                                    StopKind::Shutdown,
-                                    stop_model_timeout,
-                                );
-                                break;
+                    Some(ref mut model) => match model.execute() {
+                        ExecutionResult::Continue => idle = 0,
+                        ExecutionResult::Relax => {
+                            idle = idle.saturating_add(1);
+                            if idle < 64 {
+                                spin_loop();
+                            } else if idle < 256 {
+                                thread::yield_now();
+                            } else {
+                                thread::sleep(Duration::from_micros(2));
                             }
                         }
-                    }
+                        ExecutionResult::Stop => {
+                            tracing::info!("[TradingRuntime] model.execute stopped by itself");
+                            Controller::stop_model(model, StopKind::Stop, stop_model_timeout);
+                            maybe_model = None;
+                        }
+                        ExecutionResult::Shutdown => {
+                            tracing::info!("[TradingRuntime] model.execute shutdown by itself");
+                            Controller::stop_model(model, StopKind::Shutdown, stop_model_timeout);
+                            break;
+                        }
+                    },
                 }
             }
         });
@@ -218,6 +213,7 @@ impl<Model: BaseModel> Runtime<Model> {
     }
 }
 
+/// Guard that auto-shuts down the runtime when dropped.
 pub struct RuntimeGuard<M: BaseModel>(Option<Runtime<M>>);
 
 impl<M: BaseModel> Drop for RuntimeGuard<M> {

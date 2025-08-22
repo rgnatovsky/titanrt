@@ -10,23 +10,33 @@ use std::ops::ControlFlow;
 use std::thread;
 use std::time::Duration;
 
+/// Outcome of a single control-plane drain cycle.
 #[derive(Debug, Hash, Eq, PartialEq, Clone, Copy)]
 pub enum ControllerResult {
+    /// No inputs were available.
     Empty,
+    /// Inputs were processed successfully.
     Processed,
+    /// A new model should be initialized.
     InitModel,
+    /// Control channel is disconnected or runtime should exit.
     Disconnected,
 }
 
+/// Control-plane driver that consumes [`Input`]s and applies them
+/// to a model (if running) or a config (if not).
 pub struct Controller<M: BaseModel> {
     control_rx: RingReceiver<Input<M::Event>>,
 }
 
 impl<M: BaseModel> Controller<M> {
+    /// Create a new controller over a control channel receiver.
     pub fn new(control_rx: RingReceiver<Input<M::Event>>) -> Self {
         Self { control_rx }
     }
 
+    /// Drain up to `max` inputs and apply them according to whether
+    /// a model is present or not. Returns a [`ControllerResult`] hint.
     #[inline(always)]
     pub fn drain_inputs(
         &mut self,
@@ -66,6 +76,7 @@ impl<M: BaseModel> Controller<M> {
         }
     }
 
+    /// Internal loop to process additional inputs via a [`Policy`].
     #[inline(always)]
     fn drain_loop<P: Policy<M::Event>>(&mut self, max: usize, mut policy: P) -> ControllerResult {
         for _ in 1..max {
@@ -83,6 +94,7 @@ impl<M: BaseModel> Controller<M> {
         ControllerResult::Processed
     }
 
+    /// Handle a control input when no model is running.
     #[inline(always)]
     pub(super) fn handle_no_model(
         input: Input<M::Event>,
@@ -91,17 +103,17 @@ impl<M: BaseModel> Controller<M> {
         match input {
             Input::Command(cmd) => {
                 match cmd {
-                    // Нет модели — Start/Restart означает "инициализируй модель"
+                    // With no model, Start/Restart means "init model".
                     CommandInput::Start | CommandInput::Restart => {
                         ControlFlow::Break(ControllerResult::InitModel)
                     }
 
-                    // Управляющие «жёсткие» сигналы — выходим наружу
+                    // Hard signals — exit runtime.
                     CommandInput::Shutdown | CommandInput::Kill => {
                         ControlFlow::Break(ControllerResult::Disconnected)
                     }
 
-                    // Остальное без модели игнорируем (или можешь логировать по вкусу)
+                    // Stop/Json ignored if no model is running.
                     CommandInput::Stop | CommandInput::Json(_) => {
                         tracing::warn!(
                             "[TradingRuntime] ignoring command input without model: {:?}",
@@ -109,6 +121,8 @@ impl<M: BaseModel> Controller<M> {
                         );
                         ControlFlow::Continue(())
                     }
+
+                    // Apply config updates only to the cfg.
                     CommandInput::HotReload(v) => {
                         Self::hot_reload(None, model_cfg, v);
                         ControlFlow::Continue(())
@@ -119,61 +133,60 @@ impl<M: BaseModel> Controller<M> {
         }
     }
 
+    /// Handle a control input when a model is running.
     #[inline(always)]
     pub(super) fn handle_with_model(
         input: Input<M::Event>,
         with: &mut WithModel<M>,
     ) -> ControlFlow<ControllerResult> {
         match input {
-            Input::Command(cmd) => {
-                match cmd {
-                    CommandInput::Start => {
-                        tracing::info!(
-                            "[TradingRuntime] ignoring start signal - model already running"
-                        );
-                        ControlFlow::Continue(())
-                    }
-                    CommandInput::Stop => {
-                        tracing::info!("[TradingRuntime] stop signal received");
-                        Self::stop_model(with.model, StopKind::Stop, with.stop_timeout_secs);
-                        ControlFlow::Continue(())
-                    }
-                    CommandInput::Restart => {
-                        tracing::info!("[TradingRuntime] restart signal received");
-                        Self::stop_model(with.model, StopKind::Restart, with.stop_timeout_secs);
-                        // Выйдем наружу — пусть внешний код создаст новую модель
-                        ControlFlow::Break(ControllerResult::InitModel)
-                    }
-                    CommandInput::Shutdown => {
-                        tracing::info!("[TradingRuntime] shutdown signal received");
-                        Self::stop_model(with.model, StopKind::Shutdown, with.stop_timeout_secs);
-                        ControlFlow::Break(ControllerResult::Disconnected)
-                    }
-                    CommandInput::Kill => {
-                        tracing::info!("[TradingRuntime] kill signal received");
-                        with.cancel.cancel();
-                        ControlFlow::Break(ControllerResult::Disconnected)
-                    }
-                    CommandInput::HotReload(v) => {
-                        Self::hot_reload(Some(with.model), with.cfg, v);
-                        ControlFlow::Continue(())
-                    }
-                    CommandInput::Json(v) => {
-                        if let Err(e) = with.model.json_command(v) {
-                            tracing::error!("[TradingRuntime] model json command error: {e}");
-                        }
-                        ControlFlow::Continue(())
-                    }
+            Input::Command(cmd) => match cmd {
+                CommandInput::Start => {
+                    tracing::info!(
+                        "[TradingRuntime] ignoring start signal - model already running"
+                    );
+                    ControlFlow::Continue(())
                 }
-            }
+                CommandInput::Stop => {
+                    tracing::info!("[TradingRuntime] stop signal received");
+                    Self::stop_model(with.model, StopKind::Stop, with.stop_timeout_secs);
+                    ControlFlow::Continue(())
+                }
+                CommandInput::Restart => {
+                    tracing::info!("[TradingRuntime] restart signal received");
+                    Self::stop_model(with.model, StopKind::Restart, with.stop_timeout_secs);
+                    // Break out so the runtime can re-init.
+                    ControlFlow::Break(ControllerResult::InitModel)
+                }
+                CommandInput::Shutdown => {
+                    tracing::info!("[TradingRuntime] shutdown signal received");
+                    Self::stop_model(with.model, StopKind::Shutdown, with.stop_timeout_secs);
+                    ControlFlow::Break(ControllerResult::Disconnected)
+                }
+                CommandInput::Kill => {
+                    tracing::info!("[TradingRuntime] kill signal received");
+                    with.cancel.cancel();
+                    ControlFlow::Break(ControllerResult::Disconnected)
+                }
+                CommandInput::HotReload(v) => {
+                    Self::hot_reload(Some(with.model), with.cfg, v);
+                    ControlFlow::Continue(())
+                }
+                CommandInput::Json(v) => {
+                    if let Err(e) = with.model.json_command(v) {
+                        tracing::error!("[TradingRuntime] model json command error: {e}");
+                    }
+                    ControlFlow::Continue(())
+                }
+            },
             Input::Event(e) => {
                 with.model.on_event(e);
-
                 ControlFlow::Continue(())
             }
         }
     }
 
+    /// Apply config update, optionally calling the model’s `hot_reload`.
     pub(crate) fn hot_reload(model: Option<&mut M>, model_cfg: &mut M::Config, raw_value: Value) {
         match serde_json::from_value::<M::Config>(raw_value) {
             Ok(new_config) => {
@@ -196,6 +209,7 @@ impl<M: BaseModel> Controller<M> {
         }
     }
 
+    /// Drive the model’s `stop` method until done or timeout.
     pub(crate) fn stop_model(model: &mut M, stop_kind: StopKind, timeout_sec: u64) {
         let start = std::time::Instant::now();
         let mut by_timeout = false;
