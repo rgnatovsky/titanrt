@@ -1,5 +1,5 @@
 use crate::adapter::{RuntimeCtx, Stream, StreamDescriptor, StreamRunner};
-use crate::io::base::{BaseTx, RxPairExt, TxPairExt};
+use crate::io::base::{BaseTx, TxPairExt};
 use crate::utils::*;
 use std::{sync::Arc, thread};
 use uuid::fmt::Simple;

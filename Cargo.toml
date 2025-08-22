@@ -10,6 +10,7 @@ documentation = "https://docs.rs/reacton"
 keywords = ["reactive", "runtime", "hft", "streams", "trading"]
 categories = ["concurrency", "data-structures", "network-programming"]
 readme = "README.md"
+exclude = ["/.github", "/.vscode", "/.idea", "/target"]
 
 [dependencies]
 ringbuf = { version = "0.4.8" }
