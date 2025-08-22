@@ -274,11 +274,6 @@ fn main() -> Result<()> {
 }
 ```
 
-> Notes
->
-> * In your project, replace placeholder types (like the `Box<dyn Any>`) with your concrete `Stream<...>` type.
-> * Many users prefer to store just `action_tx`/`event_rx` plus a small `StreamHandle` (with `cancel()/stop()/is_healthy()`) instead of the full stream object.
-
 ---
 
 ## Recommended model pattern
@@ -289,7 +284,7 @@ fn main() -> Result<()> {
 
   * Drain event receivers (non-blocking), apply limits per tick.
   * Send actions into streams based on your logic/timers/state.
-  * Publish snapshots via `StateCell<S>` if needed.
+  * Take snapshots via `StateCell<S>`.
 * **Graceful stop:** cancel and join streams in `stop()`.
 * **Hot-reload:** reconfigure model, rebuild or restart streams as needed.
 
@@ -297,8 +292,8 @@ fn main() -> Result<()> {
 
 ## Control plane (commands only)
 
-* `Start`, `Stop`, `Restart`, `HotReload(Value)`, `Json(Value)`, `Shutdown`, `Kill`
-  Avoid using `Input::Event` for regular data flow; keep event ingress inside the model via streams.
+* `Start`, `Stop`, `Restart`, `HotReload(Value)`, `Json(Value)`, `Shutdown`, `Kill`.
+  Also you can `Input::Event` for regular data flow; but keep event ingress inside the model via streams.
 
 ---
 
