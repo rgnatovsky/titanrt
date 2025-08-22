@@ -1,7 +1,3 @@
-Below is a cleaned-up, **English-only**, *model-first* README where **the model owns and controls connectors/streams**. Events flow from streams into the model; the runtime control-plane is reserved for lifecycle commands (Start/Restart/Hot-reload/Shutdown).
-
----
-
 # Reacton
 
 Typed reactive runtime for real-time systems.
