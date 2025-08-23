@@ -12,7 +12,6 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
-
     #[derive(Debug, Clone)]
     enum TestOut {
         Tick(usize),
@@ -98,12 +97,6 @@ mod tests {
             self.relax_every = config.relax_every.max(1);
             // маркер, что hot_reload прошёл
             let _ = self.out_tx.try_send(TestOut::Tick(555));
-            Ok(())
-        }
-
-        fn json_command(&mut self, _value: serde_json::Value) -> anyhow::Result<()> {
-            // маркер, что json-команда дошла
-            let _ = self.out_tx.try_send(TestOut::Tick(777));
             Ok(())
         }
     }
@@ -245,31 +238,6 @@ mod tests {
 
         rt.run_blocking().expect("join failed");
         assert!(recv_done_within(&mut out_rx, Duration::from_secs(1)));
-    }
-
-    #[test]
-    fn runtime_json_command_is_forwarded_to_model() {
-        let (out_tx, mut out_rx) = MpmcChannel::bounded::<TestOut>(64);
-        let cfg = RuntimeConfig {
-            init_model_on_start: true,
-            core_id: None,
-            max_inputs_pending: Some(64),
-            max_inputs_drain: None,
-            stop_model_timeout: Some(5),
-        };
-        let model_cfg = TickCfg {
-            ticks: 3,
-            relax_every: 2,
-        };
-
-        let mut rt = Runtime::<TickModel>::spawn(cfg, NullModelCtx, model_cfg, out_tx)
-            .expect("spawn failed");
-        rt.control_tx()
-            .try_send(Input::Command(CommandInput::Json(json!({"ping": 1}))))
-            .expect("json send failed");
-
-        assert!(recv_tick_within(&mut out_rx, 777, Duration::from_secs(1)));
-        rt.run_blocking().expect("join failed");
     }
 
     #[test]

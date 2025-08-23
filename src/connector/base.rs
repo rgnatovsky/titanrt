@@ -1,9 +1,9 @@
+use crate::adapter::{Stream, StreamDescriptor, StreamSpawner};
 use crate::io::base::{BaseTx, TxPairExt};
 use crate::utils::*;
 use serde::Deserialize;
 use std::fmt::Display;
 use std::sync::Arc;
-use crate::adapter::{Stream, StreamDescriptor, StreamSpawner};
 
 /// Connector facade owned by the model.
 ///
@@ -53,11 +53,11 @@ pub trait BaseConnector: Sized + Send + 'static {
         desc: D,
         hook: Self::Hook,
     ) -> anyhow::Result<Stream<Self::ActionTx, E::RxHalf, S>>
-        where
-           Self: StreamSpawner<D, E, S>,
-           D: StreamDescriptor,
-           S: StateMarker,
-           E: BaseTx + TxPairExt,
+    where
+        Self: StreamSpawner<D, E, S>,
+        D: StreamDescriptor,
+        S: StateMarker,
+        E: BaseTx + TxPairExt,
     {
         <Self as StreamSpawner<D, E, S>>::spawn(
             self,

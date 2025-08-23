@@ -25,8 +25,6 @@ pub enum CommandInput {
     Restart,
     /// Apply new config via `BaseModel::hot_reload`.
     HotReload(Value),
-    /// Forward raw JSON to `BaseModel::json_command`.
-    Json(Value),
     /// Stop the model and end the runtime thread.
     Shutdown,
     /// Immediate termination intent (cancel everything).

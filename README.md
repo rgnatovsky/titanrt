@@ -172,7 +172,7 @@ struct MyModel {
       // The returned Stream type from spawn_stream; use concrete type in your codebase.
       // For README, we keep it inferred via `let echo = ...?; self.echo = Some(echo);`
       // so the example stays transport-agnostic.
-      // e.g.: titanrt::adapter::Stream<EchoDesc, MpmcSender<String>, ()>
+      // e.g.: titanrt::connector::Stream<EchoDesc, MpmcSender<String>, ()>
       // (type depends on your crate’s exact definitions)
       Box<dyn std::any::Any> // placeholder for README; use concrete type in real code
    >,

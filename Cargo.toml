@@ -33,4 +33,4 @@ name = "runtime_hot_loop"
 harness = false
 
 [features]
-adapter = []
+connector = []

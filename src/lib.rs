@@ -17,8 +17,8 @@
 //! ## Core types (jump in)
 //! - [`runtime::Runtime`] — control thread that feeds commands and drives the model.
 //! - [`model::BaseModel`] — your app logic (owns connectors/streams).
-//! - [`adapter::BaseConnector`] — spawns typed worker **streams**.
-//! - [`adapter::Stream`] — handle with action TX, event RX, health, state and cancel.
+//! - [`connector::BaseConnector`] — spawns typed worker **streams**.
+//! - [`connector::Stream`] — handle with action TX, event RX, health, state and cancel.
 //! - [`utils::CancelToken`] — hierarchical cooperative cancellation.
 //!
 //! ## Minimal model loop (owning a stream)
@@ -85,7 +85,7 @@
 //! - See README for a full, compiling connector/stream example and real transports.
 //!
 //! ---
-//! Re‑exports live under modules like `runtime`, `model`, `adapter`, `io`, and `utils`.
+//! Re‑exports live under modules like `runtime`, `model`, `connector`, `io`, and `utils`.
 
 pub mod config;
 pub mod control;
@@ -96,6 +96,6 @@ pub mod runtime;
 mod test;
 pub mod utils;
 
-#[cfg(feature = "adapter")]
-pub mod adapter;
+#[cfg(feature = "connector")]
+pub mod connector;
 pub mod prelude;

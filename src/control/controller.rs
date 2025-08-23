@@ -4,7 +4,7 @@ use crate::error::TryRecvError;
 use crate::io::base::BaseRx;
 use crate::io::ringbuffer::RingReceiver;
 use crate::model::{BaseModel, StopKind, StopState};
-use crate::utils::CancelToken;
+use crate::utils::{CancelToken, HealthFlag};
 use serde_json::Value;
 use std::ops::ControlFlow;
 use std::thread;
@@ -43,6 +43,7 @@ impl<M: BaseModel> Controller<M> {
         max: usize,
         maybe_model: Option<&mut M>,
         model_cfg: &mut M::Config,
+        model_health: &HealthFlag,
         cancel: &CancelToken,
         stop_timeout_secs: u64,
     ) -> ControllerResult {
@@ -60,29 +61,34 @@ impl<M: BaseModel> Controller<M> {
                     cancel,
                     stop_timeout_secs,
                 };
-                match Self::handle_with_model(inp, &mut with) {
+                match Self::handle_with_model(inp, &mut with, model_health) {
                     ControlFlow::Continue(()) => (),
                     ControlFlow::Break(r) => return r,
                 }
-                self.drain_loop(max, with)
+                self.drain_loop(max, with, model_health)
             }
             None => {
                 match Self::handle_no_model(inp, model_cfg) {
                     ControlFlow::Continue(()) => (),
                     ControlFlow::Break(r) => return r,
                 };
-                self.drain_loop(max, NoModel::<M> { c: model_cfg })
+                self.drain_loop(max, NoModel::<M> { c: model_cfg }, model_health)
             }
         }
     }
 
     /// Internal loop to process additional inputs via a [`Policy`].
     #[inline(always)]
-    fn drain_loop<P: Policy<M::Event>>(&mut self, max: usize, mut policy: P) -> ControllerResult {
+    fn drain_loop<P: Policy<M::Event>>(
+        &mut self,
+        max: usize,
+        mut policy: P,
+        model_health: &HealthFlag,
+    ) -> ControllerResult {
         for _ in 1..max {
             match self.control_rx.try_recv() {
                 Ok(inp) => {
-                    if let ControlFlow::Break(r) = policy.handle(inp) {
+                    if let ControlFlow::Break(r) = policy.handle(inp, model_health) {
                         return r;
                     }
                 }
@@ -114,7 +120,7 @@ impl<M: BaseModel> Controller<M> {
                     }
 
                     // Stop/Json ignored if no model is running.
-                    CommandInput::Stop | CommandInput::Json(_) => {
+                    CommandInput::Stop => {
                         tracing::warn!(
                             "[TradingRuntime] ignoring command input without model: {:?}",
                             cmd
@@ -138,6 +144,7 @@ impl<M: BaseModel> Controller<M> {
     pub(super) fn handle_with_model(
         input: Input<M::Event>,
         with: &mut WithModel<M>,
+        model_health: &HealthFlag,
     ) -> ControlFlow<ControllerResult> {
         match input {
             Input::Command(cmd) => match cmd {
@@ -150,32 +157,29 @@ impl<M: BaseModel> Controller<M> {
                 CommandInput::Stop => {
                     tracing::info!("[TradingRuntime] stop signal received");
                     Self::stop_model(with.model, StopKind::Stop, with.stop_timeout_secs);
+                    model_health.down();
                     ControlFlow::Continue(())
                 }
                 CommandInput::Restart => {
                     tracing::info!("[TradingRuntime] restart signal received");
                     Self::stop_model(with.model, StopKind::Restart, with.stop_timeout_secs);
-                    // Break out so the runtime can re-init.
+                    model_health.down();
                     ControlFlow::Break(ControllerResult::InitModel)
                 }
                 CommandInput::Shutdown => {
                     tracing::info!("[TradingRuntime] shutdown signal received");
                     Self::stop_model(with.model, StopKind::Shutdown, with.stop_timeout_secs);
+                    model_health.down();
                     ControlFlow::Break(ControllerResult::Disconnected)
                 }
                 CommandInput::Kill => {
                     tracing::info!("[TradingRuntime] kill signal received");
                     with.cancel.cancel();
+                    model_health.down();
                     ControlFlow::Break(ControllerResult::Disconnected)
                 }
                 CommandInput::HotReload(v) => {
                     Self::hot_reload(Some(with.model), with.cfg, v);
-                    ControlFlow::Continue(())
-                }
-                CommandInput::Json(v) => {
-                    if let Err(e) = with.model.json_command(v) {
-                        tracing::error!("[TradingRuntime] model json command error: {e}");
-                    }
                     ControlFlow::Continue(())
                 }
             },

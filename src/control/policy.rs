@@ -1,11 +1,12 @@
 use crate::control::controller::{Controller, ControllerResult};
 use crate::control::inputs::Input;
 use crate::model::{BaseModel, ModelEvent};
-use crate::utils::CancelToken;
+use crate::utils::{CancelToken, HealthFlag};
 use std::ops::ControlFlow;
 
 pub trait Policy<E: ModelEvent> {
-    fn handle(&mut self, inp: Input<E>) -> ControlFlow<ControllerResult>;
+    fn handle(&mut self, inp: Input<E>, model_health: &HealthFlag)
+    -> ControlFlow<ControllerResult>;
 }
 
 pub struct WithModel<'m, M: BaseModel> {
@@ -17,8 +18,12 @@ pub struct WithModel<'m, M: BaseModel> {
 
 impl<'m, M: BaseModel> Policy<M::Event> for WithModel<'m, M> {
     #[inline(always)]
-    fn handle(&mut self, inp: Input<M::Event>) -> ControlFlow<ControllerResult> {
-        match Controller::<M>::handle_with_model(inp, self) {
+    fn handle(
+        &mut self,
+        inp: Input<M::Event>,
+        model_health: &HealthFlag,
+    ) -> ControlFlow<ControllerResult> {
+        match Controller::<M>::handle_with_model(inp, self, model_health) {
             ControlFlow::Continue(()) => ControlFlow::Continue(()),
             ControlFlow::Break(r) => ControlFlow::Break(r),
         }
@@ -31,7 +36,11 @@ pub struct NoModel<'m, M: BaseModel> {
 
 impl<'m, M: BaseModel> Policy<M::Event> for NoModel<'m, M> {
     #[inline(always)]
-    fn handle(&mut self, inp: Input<M::Event>) -> ControlFlow<ControllerResult> {
+    fn handle(
+        &mut self,
+        inp: Input<M::Event>,
+        _model_health: &HealthFlag,
+    ) -> ControlFlow<ControllerResult> {
         match Controller::<M>::handle_no_model(inp, self.c) {
             ControlFlow::Continue(()) => ControlFlow::Continue(()),
             ControlFlow::Break(r) => ControlFlow::Break(r),

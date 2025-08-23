@@ -99,10 +99,5 @@ pub trait BaseModel: Sized {
         let _ = config;
         Ok(())
     }
-
-    /// Handle an ad-hoc JSON command (optional).
-    fn json_command(&mut self, value: serde_json::Value) -> Result<()> {
-        let _ = value;
-        Ok(())
-    }
+    
 }

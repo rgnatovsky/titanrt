@@ -4,7 +4,7 @@ pub use spawner::*;
 pub use stream::*;
 pub use connector::*;
 
-mod connector;
+mod base;
 mod descriptor;
 pub mod errors;
 mod runner;
