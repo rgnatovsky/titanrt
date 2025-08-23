@@ -1,9 +1,11 @@
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+use titanrt::control::inputs::InputMeta;
 use titanrt::io::mpmc::MpmcChannel;
+use titanrt::model::Output;
 use titanrt::prelude::{
     BaseModel, BaseRx, BaseTx, ExecutionResult, NullEvent, NullModelCtx, Runtime, RuntimeConfig,
     StopKind, StopState,
@@ -22,13 +24,14 @@ enum TestOut {
 
 struct HotModel {
     left: u64,
-    done_tx: titanrt::io::mpmc::MpmcSender<TestOut>,
+    done_tx: titanrt::io::mpmc::MpmcSender<Output<TestOut>>,
     _cancel: CancelToken,
 }
 
 impl BaseModel for HotModel {
     type Config = HotCfg;
-    type OutputTx = titanrt::io::mpmc::MpmcSender<TestOut>;
+    type OutputTx = titanrt::io::mpmc::MpmcSender<Output<TestOut>>;
+    type OutputEvent = TestOut;
     type Event = NullEvent;
     type Ctx = NullModelCtx;
 
@@ -49,22 +52,26 @@ impl BaseModel for HotModel {
     #[inline(always)]
     fn execute(&mut self) -> ExecutionResult {
         if self.left == 0 {
-            let _ = self.done_tx.try_send(TestOut::Done);
-            return ExecutionResult::Stop;
+            let _ = self.done_tx.try_send(Output::generic(TestOut::Done));
+            return ExecutionResult::Shutdown;
         }
         self.left = black_box(self.left - 1);
         ExecutionResult::Continue
     }
 
-    fn on_event(&mut self, _event: Self::Event) {}
+    fn on_event(&mut self, _event: Self::Event, _meta: Option<InputMeta>) {}
 
     fn stop(&mut self, _kind: StopKind) -> StopState {
         StopState::Done
     }
+
+    fn hot_reload(&mut self, _config: &Self::Config) -> anyhow::Result<()> {
+       Ok(())
+    }
 }
 
 fn run_hot_loop(total_iters: u64) -> Duration {
-    let (out_tx, mut out_rx) = MpmcChannel::bounded::<TestOut>(8);
+    let (out_tx, mut out_rx) = MpmcChannel::bounded::<Output<TestOut>>(8);
 
     let cfg = RuntimeConfig {
         init_model_on_start: true,
@@ -89,7 +96,7 @@ fn run_hot_loop(total_iters: u64) -> Duration {
 pub fn bench_hot_loop(c: &mut Criterion) {
     let mut group = c.benchmark_group("trading_runtime_hot_loop");
 
-    for &iters in &[5_000_000_u64, 20_000_000_u64, 80_000_000_u64] {
+    for &iters in &[5_000_000_u64, 20_000_000_u64, 100_000_000_u64] {
         group.bench_function(BenchmarkId::from_parameter(iters), |b| {
             b.iter_custom(|n| {
                 let mut total = std::time::Duration::ZERO;

@@ -1,9 +1,9 @@
 use crate::config::RuntimeConfig;
 use crate::control::controller::{Controller, ControllerResult};
-use crate::control::inputs::{CommandInput, Input};
+use crate::control::inputs::{CommandInput, Input, InputPayload};
 use crate::io::base::BaseTx;
 use crate::io::ringbuffer::{RingBuffer, RingSender};
-use crate::model::{BaseModel, ExecutionResult, StopKind};
+use crate::model::{BaseModel, ExecutionResult, Output, StopKind};
 use crate::utils::CancelToken;
 use crate::utils::{try_pin_core, HealthFlag};
 use anyhow::{anyhow, Result};
@@ -51,7 +51,7 @@ impl<Model: BaseModel> Runtime<Model> {
     pub fn shutdown(mut self) {
         if let Some(join) = self.join.take() {
             self.control_tx
-                .try_send(Input::Command(CommandInput::Shutdown))
+                .try_send(Input::command(CommandInput::Shutdown))
                 .ok();
             let _ = join.join();
         }
@@ -81,13 +81,14 @@ impl<Model: BaseModel> Runtime<Model> {
         cfg: RuntimeConfig,
         ctx: Model::Ctx,
         mut model_cfg: Model::Config,
-        output_tx: Model::OutputTx,
+        mut output_tx: Model::OutputTx,
     ) -> Result<Self> {
         let max_inputs_pending = cfg.max_inputs_pending.unwrap_or(1024);
         let max_inputs_drain = cfg.max_inputs_drain.unwrap_or(max_inputs_pending);
         let stop_model_timeout = cfg.stop_model_timeout.unwrap_or(300);
         let model_health = HealthFlag::new(false);
-        let (control_tx, control_rx) = RingBuffer::bounded(max_inputs_pending);
+        let (control_tx, control_rx) =
+            RingBuffer::bounded::<Input<Model::Event>>(max_inputs_pending);
 
         let join: JoinHandle<()>;
 
@@ -149,7 +150,13 @@ impl<Model: BaseModel> Runtime<Model> {
                     if term_flag.load(Ordering::Relaxed) {
                         tracing::warn!("[TradingRuntime] termination signal received");
                         if let Some(ref mut model) = maybe_model {
-                            Controller::stop_model(model, StopKind::Shutdown, stop_model_timeout);
+                            Controller::stop_model(
+                                model,
+                                StopKind::Shutdown,
+                                stop_model_timeout,
+                                &mut output_tx,
+                                None,
+                            );
                         }
                         cancel_token.cancel();
                         break;
@@ -161,6 +168,7 @@ impl<Model: BaseModel> Runtime<Model> {
                         maybe_model.as_mut(),
                         &mut model_cfg,
                         &model_health,
+                        &mut output_tx,
                         &cancel_token,
                         stop_model_timeout,
                     ) {
@@ -170,7 +178,7 @@ impl<Model: BaseModel> Runtime<Model> {
                             tracing::error!("[TradingRuntime] control disconnected");
                             break;
                         }
-                        ControllerResult::InitModel => {
+                        ControllerResult::InitModel(maybe_corr_id) => {
                             tracing::info!("[TradingRuntime] model init");
                             maybe_model = match Model::initialize(
                                 ctx.clone(),
@@ -181,10 +189,23 @@ impl<Model: BaseModel> Runtime<Model> {
                             ) {
                                 Ok(model) => {
                                     model_health.up();
+                                    if let Some(corr_id) = maybe_corr_id {
+                                        output_tx
+                                            .try_send(Output::internal(corr_id, true, None))
+                                            .ok();
+                                    }
                                     Some(model)
                                 }
                                 Err(e) => {
-                                    tracing::error!("[TradingRuntime] model init error: {}", e);
+                                    if let Some(corr_id) = maybe_corr_id {
+                                        output_tx
+                                            .try_send(Output::internal(
+                                                corr_id,
+                                                false,
+                                                Some(e.to_string()),
+                                            ))
+                                            .ok();
+                                    }
                                     None
                                 }
                             };
@@ -209,7 +230,13 @@ impl<Model: BaseModel> Runtime<Model> {
                             }
                             ExecutionResult::Stop => {
                                 tracing::info!("[TradingRuntime] model.execute stopped by itself");
-                                Controller::stop_model(model, StopKind::Stop, stop_model_timeout);
+                                Controller::stop_model(
+                                    model,
+                                    StopKind::Stop,
+                                    stop_model_timeout,
+                                    &mut output_tx,
+                                    None,
+                                );
                                 model_health.down();
                                 maybe_model = None;
                             }
@@ -219,6 +246,8 @@ impl<Model: BaseModel> Runtime<Model> {
                                     model,
                                     StopKind::Shutdown,
                                     stop_model_timeout,
+                                    &mut output_tx,
+                                    None,
                                 );
                                 model_health.down();
                                 break;
@@ -245,7 +274,7 @@ impl<M: BaseModel> Drop for RuntimeGuard<M> {
     fn drop(&mut self) {
         if let Some(mut rt) = self.0.take() {
             rt.control_tx
-                .try_send(Input::Command(CommandInput::Shutdown))
+                .try_send(Input::command(CommandInput::Shutdown))
                 .ok();
         }
     }
@@ -254,7 +283,7 @@ impl<M: BaseModel> Drop for RuntimeGuard<M> {
 impl<M: BaseModel> Drop for Runtime<M> {
     fn drop(&mut self) {
         self.control_tx
-            .try_send(Input::Command(CommandInput::Shutdown))
+            .try_send(Input::command(CommandInput::Shutdown))
             .ok();
     }
 }

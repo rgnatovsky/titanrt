@@ -5,6 +5,7 @@ use anyhow::anyhow;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use titanrt::connector::{BaseConnector, Stream};
+use titanrt::control::inputs::InputMeta;
 use titanrt::io::ringbuffer::{RingReceiver, RingSender};
 use titanrt::prelude::*;
 use titanrt::utils::{CancelToken, CorePickPolicy, StateCell, StateMarker};
@@ -19,7 +20,7 @@ impl StateMarker for CounterState {}
 pub struct TestModel {
     _config: String,
     _reserved_core_id: Option<usize>,
-    _outputs: NullTx,
+    _outputs: NullOutputTx,
     _cancel_token: CancelToken,
     last_seq: u64,
     stream: Stream<RingSender<CounterAction>, RingReceiver<u64>, CounterState>,
@@ -44,7 +45,8 @@ fn my_counter_hook(e: &CounterEvent, tx: &mut RingSender<u64>, s: &StateCell<Cou
 
 impl BaseModel for TestModel {
     type Config = String;
-    type OutputTx = NullTx;
+    type OutputTx = NullOutputTx;
+    type OutputEvent = ();
     type Event = NullEvent;
     type Ctx = TestModelContext;
 
@@ -52,7 +54,7 @@ impl BaseModel for TestModel {
         ctx: Self::Ctx,
         config: Self::Config,
         pinned_core_id: Option<usize>,
-        outputs: NullTx,
+        outputs: NullOutputTx,
         cancel_token: CancelToken,
     ) -> anyhow::Result<Self> {
         let mut connector = CompositeConnector::init(
@@ -114,7 +116,7 @@ impl BaseModel for TestModel {
         ExecutionResult::Continue
     }
 
-    fn on_event(&mut self, _event: Self::Event) {}
+    fn on_event(&mut self, _event: Self::Event, _meta: Option<InputMeta>) {}
 
     fn stop(&mut self, _stop_kind: StopKind) -> StopState {
         tracing::info!(

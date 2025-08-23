@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod tests {
     use crate::config::RuntimeConfig;
-    use crate::control::inputs::{CommandInput, Input};
+    use crate::control::inputs::{CommandInput, Input, InputMeta};
     use crate::io::base::{BaseRx, BaseTx};
     use crate::io::mpmc::{MpmcChannel, MpmcReceiver, MpmcSender};
-    use crate::model::{BaseModel, ExecutionResult, NullModelCtx, StopKind, StopState};
+    use crate::model::{BaseModel, ExecutionResult, NullModelCtx, Output, StopKind, StopState};
     use crate::runtime::Runtime;
     use crate::utils::*;
     use serde::{Deserialize, Serialize};
@@ -35,13 +35,14 @@ mod tests {
     struct TickModel {
         remain: usize,
         relax_every: usize,
-        out_tx: MpmcSender<TestOut>,
+        out_tx: MpmcSender<Output<TestOut>>,
         _cancel: CancelToken,
     }
 
     impl BaseModel for TickModel {
         type Config = TickCfg;
-        type OutputTx = MpmcSender<TestOut>;
+        type OutputTx = MpmcSender<Output<TestOut>>;
+        type OutputEvent = TestOut;
         type Event = TestEvent;
         type Ctx = NullModelCtx;
 
@@ -62,13 +63,13 @@ mod tests {
 
         fn execute(&mut self) -> ExecutionResult {
             if self.remain == 0 {
-                let _ = self.out_tx.try_send(TestOut::Done);
+                let _ = self.out_tx.try_send(Output::Generic(TestOut::Done));
                 return ExecutionResult::Shutdown;
             }
 
             let cur = self.remain;
             self.remain = self.remain.saturating_sub(1);
-            let _ = self.out_tx.try_send(TestOut::Tick(cur));
+            let _ = self.out_tx.try_send(Output::Generic(TestOut::Tick(cur)));
 
             if cur % self.relax_every == 0 {
                 ExecutionResult::Relax
@@ -77,11 +78,13 @@ mod tests {
             }
         }
 
-        fn on_event(&mut self, event: Self::Event) {
+        fn on_event(&mut self, event: Self::Event, _meta: Option<InputMeta>) {
             // Для теста просто сигнализируем о получении события
             match event {
                 TestEvent::Ping(v) => {
-                    let _ = self.out_tx.try_send(TestOut::Tick(900 + v as usize));
+                    let _ = self
+                        .out_tx
+                        .try_send(Output::Generic(TestOut::Tick(900 + v as usize)));
                 }
             }
         }
@@ -96,34 +99,39 @@ mod tests {
             self.remain = config.ticks;
             self.relax_every = config.relax_every.max(1);
             // маркер, что hot_reload прошёл
-            let _ = self.out_tx.try_send(TestOut::Tick(555));
+            let _ = self.out_tx.try_send(Output::Generic(TestOut::Tick(555)));
             Ok(())
         }
     }
 
     // ---- helper: дождаться Done из out_rx без активного спина
-    fn recv_done_within(rx: &mut MpmcReceiver<TestOut>, dur: Duration) -> bool {
+    fn recv_done_within(rx: &mut MpmcReceiver<Output<TestOut>>, dur: Duration) -> bool {
         let start = Instant::now();
         loop {
             if start.elapsed() > dur {
                 return false;
             }
             match rx.try_recv() {
-                Ok(TestOut::Done) => return true,
-                Ok(TestOut::Tick(_count)) => continue,
+                Ok(Output::Generic(TestOut::Done)) => return true,
+                Ok(Output::Generic(TestOut::Tick(_count))) => continue,
+                Ok(_) => continue,
                 Err(_) => thread::sleep(Duration::from_micros(100)),
             }
         }
     }
 
-    fn recv_tick_within(rx: &mut MpmcReceiver<TestOut>, expect: usize, dur: Duration) -> bool {
+    fn recv_tick_within(
+        rx: &mut MpmcReceiver<Output<TestOut>>,
+        expect: usize,
+        dur: Duration,
+    ) -> bool {
         let start = Instant::now();
         loop {
             if start.elapsed() > dur {
                 return false;
             }
             match rx.try_recv() {
-                Ok(TestOut::Tick(v)) if v == expect => return true,
+                Ok(Output::Generic(TestOut::Tick(v))) if v == expect => return true,
                 Ok(_) => continue,
                 Err(_) => thread::sleep(Duration::from_micros(100)),
             }
@@ -132,7 +140,7 @@ mod tests {
 
     #[test]
     fn runtime_autostarts_and_stops() {
-        let (out_tx, mut out_rx) = MpmcChannel::bounded::<TestOut>(64);
+        let (out_tx, mut out_rx) = MpmcChannel::bounded::<Output<TestOut>>(64);
 
         let cfg = RuntimeConfig {
             init_model_on_start: true,
@@ -155,7 +163,7 @@ mod tests {
 
     #[test]
     fn runtime_manual_init_then_stops() {
-        let (out_tx, mut out_rx) = MpmcChannel::bounded::<TestOut>(64);
+        let (out_tx, mut out_rx) = MpmcChannel::bounded::<Output<TestOut>>(64);
 
         let cfg = RuntimeConfig {
             init_model_on_start: false,
@@ -175,7 +183,7 @@ mod tests {
 
         // Триггерим инициализацию модели через контрол-команду
         rt.control_tx()
-            .try_send(Input::Command(CommandInput::Start))
+            .try_send(Input::command(CommandInput::Start))
             .expect("control try_send failed");
 
         rt.run_blocking().expect("join failed");
@@ -184,7 +192,7 @@ mod tests {
 
     #[test]
     fn runtime_guard_sends_shutdown_on_drop() {
-        let (out_tx, _out_rx) = MpmcChannel::bounded::<TestOut>(8);
+        let (out_tx, _out_rx) = MpmcChannel::bounded::<Output<TestOut>>(8);
 
         let cfg = RuntimeConfig {
             init_model_on_start: false,
@@ -207,7 +215,7 @@ mod tests {
 
     #[test]
     fn runtime_hotreload_before_start_applies_to_config() {
-        let (out_tx, mut out_rx) = MpmcChannel::bounded::<TestOut>(64);
+        let (out_tx, mut out_rx) = MpmcChannel::bounded::<Output<TestOut>>(64);
 
         let cfg = RuntimeConfig {
             init_model_on_start: false,
@@ -226,14 +234,14 @@ mod tests {
 
         // Обновляем конфиг до очень маленького количества тиков ещё до старта
         rt.control_tx()
-            .try_send(Input::Command(CommandInput::HotReload(
+            .try_send(Input::command(CommandInput::HotReload(
                 json!({"ticks": 1, "relax_every": 1}),
             )))
             .expect("hotreload send failed");
 
         // Теперь запускаем
         rt.control_tx()
-            .try_send(Input::Command(CommandInput::Start))
+            .try_send(Input::command(CommandInput::Start))
             .expect("start send failed");
 
         rt.run_blocking().expect("join failed");
@@ -242,7 +250,7 @@ mod tests {
 
     #[test]
     fn runtime_kill_exits_quickly() {
-        let (out_tx, _out_rx) = MpmcChannel::bounded::<TestOut>(16);
+        let (out_tx, _out_rx) = MpmcChannel::bounded::<Output<TestOut>>(16);
         let cfg = RuntimeConfig {
             init_model_on_start: true,
             core_id: None,
@@ -258,7 +266,7 @@ mod tests {
         let mut rt = Runtime::<TickModel>::spawn(cfg, NullModelCtx, model_cfg, out_tx)
             .expect("spawn failed");
         rt.control_tx()
-            .try_send(Input::Command(CommandInput::Kill))
+            .try_send(Input::command(CommandInput::Kill))
             .expect("kill send failed");
         // Если kill обработан, поток рантайма завершится без паники
         rt.run_blocking().expect("join failed");
@@ -266,7 +274,7 @@ mod tests {
 
     #[test]
     fn runtime_delivers_events_to_model() {
-        let (out_tx, mut out_rx) = MpmcChannel::bounded::<TestOut>(64);
+        let (out_tx, mut out_rx) = MpmcChannel::bounded::<Output<TestOut>>(64);
         let cfg = RuntimeConfig {
             init_model_on_start: true,
             core_id: None,
@@ -283,7 +291,7 @@ mod tests {
             .expect("spawn failed");
         // Отправим событие и ждём маркер 900 + 1 = 901
         rt.control_tx()
-            .try_send(Input::Event(TestEvent::Ping(1)))
+            .try_send(Input::event(TestEvent::Ping(1)))
             .expect("event send failed");
 
         assert!(recv_tick_within(&mut out_rx, 901, Duration::from_secs(1)));

@@ -1,5 +1,5 @@
-mod test_model;
 mod connector;
+mod test_model;
 
 use crate::test_model::{TestModel, TestModelContext};
 use crossbeam::channel::bounded;
@@ -39,8 +39,12 @@ pub fn main() {
         count: Arc::new(Mutex::new(0)),
     };
 
-    let rt =
-        Runtime::<TestModel>::spawn(cfg, model_ctx, "test_model_cfg_string".to_string(), NullTx);
+    let rt = Runtime::<TestModel>::spawn(
+        cfg,
+        model_ctx,
+        "test_model_cfg_string".to_string(),
+        NullOutputTx,
+    );
 
     rt.unwrap().run_blocking().unwrap()
 }

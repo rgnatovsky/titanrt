@@ -1,9 +1,14 @@
+use crate::control::inputs::InputMeta;
+use crate::error::SendError;
 use crate::io::base::BaseTx;
+use crate::utils::time::timestamp::now_millis;
 use crate::utils::CancelToken;
 use anyhow::Result;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::fmt::Debug;
+use std::time::Duration;
+use uuid::Uuid;
 
 /// Marker for a clonable, sendable model context.
 pub trait ModelContext: Send + 'static + Clone {}
@@ -55,11 +60,54 @@ pub enum StopState {
 }
 
 /// Optional side-channel output from the model.
-pub enum Output<T: Send + 'static = ()> {
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum Output<T: Send + 'static> {
     /// User-defined payload.
-    Custom(T),
+    Generic(T),
     /// Error to report upstream.
-    Err(anyhow::Error),
+    Internal {
+        sent_at: u64,
+        corr_id: Uuid,
+        success: bool,
+        error: Option<String>,
+    },
+}
+
+impl<T: Send + 'static> Output<T> {
+    pub fn internal(corr_id: Uuid, success: bool, error: Option<String>) -> Self {
+        Self::Internal {
+            sent_at: now_millis(),
+            corr_id,
+            success,
+            error,
+        }
+    }
+    pub fn generic(payload: T) -> Self {
+        Self::Generic(payload)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct NullOutputTx;
+impl BaseTx for NullOutputTx {
+    type EventType = Output<()>;
+
+    fn try_send(
+        &mut self,
+        _a: Self::EventType,
+    ) -> std::result::Result<(), SendError<Self::EventType>> {
+        Ok(())
+    }
+
+    fn send(
+        &mut self,
+        _a: Self::EventType,
+        _cancel: &CancelToken,
+        _timeout: Option<Duration>,
+    ) -> std::result::Result<(), SendError<Self::EventType>> {
+        Ok(())
+    }
 }
 
 /// Contract for application logic driven by the runtime.
@@ -67,7 +115,8 @@ pub trait BaseModel: Sized {
     /// Configuration type (serde-deserializable).
     type Config: Send + Clone + for<'a> Deserialize<'a> + Any;
     /// Output transport used by the model.
-    type OutputTx: BaseTx + Clone;
+    type OutputTx: BaseTx<EventType = Output<Self::OutputEvent>> + Clone;
+    type OutputEvent: Send + 'static + Clone;
     /// Primary event type consumed by the model.
     type Event: ModelEvent;
     /// Context passed on initialization.
@@ -89,7 +138,7 @@ pub trait BaseModel: Sized {
     fn execute(&mut self) -> ExecutionResult;
 
     /// Handle a typed event delivered to the model from outside of the runtime.
-    fn on_event(&mut self, event: Self::Event);
+    fn on_event(&mut self, event: Self::Event, meta: Option<InputMeta>);
 
     /// Cooperatively stop the model; can be realized through multiple calls.
     fn stop(&mut self, kind: StopKind) -> StopState;
@@ -99,5 +148,4 @@ pub trait BaseModel: Sized {
         let _ = config;
         Ok(())
     }
-    
 }

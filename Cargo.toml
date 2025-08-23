@@ -24,6 +24,8 @@ tracing = "0.1.41"
 uuid = { version = "1.17.0", features = ["serde", "v4"] }
 ahash = "0.8.12"
 signal-hook = "0.3.18"
+chrono = "0.4.41"
+regex = "1.11.1"
 
 [dev-dependencies]
 criterion = "0.7.0"
