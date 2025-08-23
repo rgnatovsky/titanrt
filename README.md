@@ -92,11 +92,11 @@ fn main() -> Result<()> {
 
 Use the control sender to post **typed events** or **lifecycle/config commands**:
 
-```rust
+```Rust
 use titanrt::control::inputs::{Input, CommandInput};
 use serde_json::json;
 
-let mut rt = Runtime::<MyModel>::spawn(cfg, ctx, model_cfg, outputs) ?;
+let mut rt = Runtime::<MyModel>::spawn(cfg, ctx, model_cfg, outputs)?;
 
 // Start (if not auto-started)
 rt.control_tx().try_send(Input::Command(CommandInput::Start)).ok();
