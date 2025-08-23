@@ -1,4 +1,4 @@
-use crate::adapter::{RuntimeCtx, Stream, StreamDescriptor, StreamRunner};
+use crate::connector::{RuntimeCtx, Stream, StreamDescriptor, StreamRunner};
 use crate::io::base::{BaseTx, TxPairExt};
 use crate::utils::*;
 use std::{sync::Arc, thread};

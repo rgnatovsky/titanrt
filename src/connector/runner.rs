@@ -1,5 +1,5 @@
-use crate::adapter::errors::StreamResult;
-use crate::adapter::StreamDescriptor;
+use crate::connector::errors::StreamResult;
+use crate::connector::StreamDescriptor;
 use crate::io::base::{BaseTx, TxPairExt};
 use crate::utils::*;
 use std::sync::Arc;

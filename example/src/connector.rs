@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::sync::Arc;
-use titanrt::adapter::errors::StreamResult;
-use titanrt::adapter::{
+use titanrt::connector::errors::StreamResult;
+use titanrt::connector::{
     BaseConnector, Kind, RuntimeCtx, StreamDescriptor, StreamRunner, StreamSpawner, Venue,
 };
 use titanrt::io::ringbuffer::RingSender;

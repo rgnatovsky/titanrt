@@ -1,4 +1,4 @@
-use crate::adapter::{Stream, StreamDescriptor, StreamSpawner};
+use crate::connector::{Stream, StreamDescriptor, StreamSpawner};
 use crate::io::base::{BaseTx, TxPairExt};
 use crate::utils::*;
 use serde::Deserialize;

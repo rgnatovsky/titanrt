@@ -1,4 +1,4 @@
-use crate::adapter::errors::{StreamError, StreamResult};
+use crate::connector::errors::{StreamError, StreamResult};
 use crate::error::{RecvError, SendError, TryRecvError};
 use crate::io::base::{BaseRx, BaseTx, RxMarker, TxMarker};
 use crate::utils::*;
@@ -135,9 +135,9 @@ impl<A: BaseTx, E: BaseRx, S: StateMarker> Stream<A, E, S> {
                 Ok(r) => r,
                 Err(p) => Err(StreamError::JoinPanic(
                     p.downcast_ref::<&str>()
-                     .map(|s| s.to_string())
-                     .or_else(|| p.downcast_ref::<String>().cloned())
-                     .unwrap_or_else(|| "panic (unknown type)".into()),
+                        .map(|s| s.to_string())
+                        .or_else(|| p.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "panic (unknown type)".into()),
                 )),
             }
         } else {
@@ -153,10 +153,10 @@ impl<A: BaseTx, E: BaseRx, S: StateMarker> Stream<A, E, S> {
 }
 
 impl<A, E, S> Stream<A, E, S>
-    where
-       A: BaseTx + TxMarker,
-       E: BaseRx,
-       S: StateMarker,
+where
+    A: BaseTx + TxMarker,
+    E: BaseRx,
+    S: StateMarker,
 {
     /// Non-blocking send of an action into the worker.
     #[inline]
@@ -185,10 +185,10 @@ impl<A, E, S> Stream<A, E, S>
 }
 
 impl<A, E, S> Stream<A, E, S>
-    where
-       A: BaseTx,
-       E: BaseRx + RxMarker,
-       S: StateMarker,
+where
+    A: BaseTx,
+    E: BaseRx + RxMarker,
+    S: StateMarker,
 {
     // ---- event consumption ----
 
@@ -224,10 +224,10 @@ impl<A, E, S> Stream<A, E, S>
 }
 
 impl<A, E, S> Drop for Stream<A, E, S>
-    where
-       A: BaseTx,
-       E: BaseRx,
-       S: StateMarker,
+where
+    A: BaseTx,
+    E: BaseRx,
+    S: StateMarker,
 {
     #[inline]
     fn drop(&mut self) {
@@ -238,15 +238,15 @@ impl<A, E, S> Drop for Stream<A, E, S>
 }
 
 impl<A, E, S> Debug for Stream<A, E, S>
-    where
-       A: BaseTx,
-       E: BaseRx,
-       S: StateMarker,
+where
+    A: BaseTx,
+    E: BaseRx,
+    S: StateMarker,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Stream")
-         .field("id", &self.id)
-         .field("is_cancelled", &self.cancel.is_cancelled())
-         .finish()
+            .field("id", &self.id)
+            .field("is_cancelled", &self.cancel.is_cancelled())
+            .finish()
     }
 }

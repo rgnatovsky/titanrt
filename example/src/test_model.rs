@@ -4,7 +4,7 @@ use crate::connector::{
 use anyhow::anyhow;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use titanrt::adapter::{BaseConnector, Stream};
+use titanrt::connector::{BaseConnector, Stream};
 use titanrt::io::ringbuffer::{RingReceiver, RingSender};
 use titanrt::prelude::*;
 use titanrt::utils::{CancelToken, CorePickPolicy, StateCell, StateMarker};
