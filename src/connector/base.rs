@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 /// Connector facade owned by the model.
 ///
-/// A `BaseConnector` is a lightweight handle that can spawn typed worker
+/// A `BaseConnector` is a lightweight handle that can spawn typed stream
 /// streams. It keeps shared resources (e.g., network clients, core stats,
 /// root cancel token) and delegates per-stream spawning to its
 /// `StreamSpawner` implementation.

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-titanrt = { path = "..", features = ["adapter"] }
+titanrt = { path = "..", features = ["connector"] }
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
 crossbeam = "0.8.4"
