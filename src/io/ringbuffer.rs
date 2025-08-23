@@ -13,7 +13,7 @@ pub struct RingBuffer;
 
 impl RingBuffer {
     pub fn bounded<T>(capacity: usize) -> (RingSender<T>, RingReceiver<T>) {
-        // HeapRb — потокобезопасное хранилище; split() даёт прод/конс.
+        // HeapRb — thread-safe storage; split() returns producer/consumer halves.
         let rb = HeapRb::<T>::new(capacity);
         let (prod, cons) = rb.split();
 
@@ -30,7 +30,7 @@ impl<E: Send + 'static + Clone> BaseTx for RingSender<E> {
 
     #[inline]
     fn try_send(&mut self, a: E) -> Result<(), SendError<E>> {
-        // У продюсера неблокирующий try_push: Ok(()) или Err(a) если full. :contentReference[oaicite:2]{index=2}
+        // Producer has non-blocking try_push: Ok(()) or Err(a) if the buffer is full.
         self.prod.try_push(a).map_err(|v| SendError::full(Some(v)))
     }
 
@@ -57,12 +57,12 @@ impl<E: Send + 'static + Clone> BaseTx for RingSender<E> {
             match self.prod.try_push(a) {
                 Ok(()) => return Ok(()),
                 Err(aa) => {
-                    a = aa; // буфер полон, владеем значением и продолжаем
+                    a = aa; // buffer is full, we keep ownership and continue retrying
                     spins = spins.saturating_add(1);
                     if spins < 64 {
                         backoff.spin();
                     } else if spins < 256 {
-                        backoff.snooze(); // примерно yield
+                        backoff.snooze(); // roughly a yield
                     } else {
                         thread::sleep(Duration::from_micros(2));
                     }
@@ -106,7 +106,7 @@ impl<E: Send + 'static> BaseRx for RingReceiver<E> {
                     if spins < 64 {
                         backoff.spin();
                     } else if spins < 256 {
-                        backoff.snooze(); // примерно yield
+                        backoff.snooze(); // roughly a yield
                     } else {
                         thread::sleep(Duration::from_micros(2));
                     }

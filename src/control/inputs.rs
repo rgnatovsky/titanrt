@@ -96,17 +96,17 @@ impl<E: ModelEvent> Input<E> {
         self
     }
 
-    /// Получить id, если есть мета.
+    /// Get id if metadata is present.
     pub fn id(&self) -> Option<Uuid> {
         self.meta.as_ref().map(|m| m.id)
     }
 
-    /// Источник как &str, если есть.
+    /// Source as &str if present.
     pub fn source(&self) -> Option<&str> {
         self.meta.as_ref().and_then(|m| m.source.as_deref())
     }
 
-    /// Быстрая проверка типа payload.
+    /// Quick check for payload type.
     pub fn is_event(&self) -> bool {
         matches!(self.payload, InputPayload::Event(_))
     }
@@ -115,7 +115,7 @@ impl<E: ModelEvent> Input<E> {
         matches!(self.payload, InputPayload::Command(_))
     }
 
-    /// Маппинг типа события без аллокации/копии команды.
+    /// Map the event type without allocating/copying the command.
     pub fn map_event<T: ModelEvent>(self, f: impl FnOnce(E) -> T) -> Input<T> {
         let payload = match self.payload {
             InputPayload::Event(ev) => InputPayload::Event(f(ev)),
@@ -127,7 +127,7 @@ impl<E: ModelEvent> Input<E> {
         }
     }
 
-    /// Обеспечить наличие метаданных; вернёт &mut для точечной правки.
+    /// Ensure metadata exists; returns &mut for in-place edits.
     pub fn meta_mut(&mut self) -> &mut InputMeta {
         Self::ensure_meta(&mut self.meta);
         self.meta.as_mut().unwrap()
@@ -140,7 +140,7 @@ impl<E: ModelEvent> Input<E> {
     }
 }
 
-// Утилиты и преобразования
+// Utilities and conversions
 
 impl<E: ModelEvent> From<E> for Input<E> {
     fn from(ev: E) -> Self {

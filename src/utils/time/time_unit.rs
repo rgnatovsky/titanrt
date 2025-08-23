@@ -18,7 +18,7 @@ pub enum TimeUnit {
 }
 
 impl TimeUnit {
-    /// Конвертирует в наносекунды (базовая единица)
+    /// Convert to nanoseconds (base unit)
     #[inline]
     pub const fn to_nanos(&self, value: u64) -> u128 {
         value as u128
@@ -45,7 +45,7 @@ impl TimeUnit {
             TimeUnit::Hour => Duration::from_secs(value * 60 * 60),
             TimeUnit::Day => Duration::from_secs(value * 60 * 60 * 24),
             TimeUnit::Week => Duration::from_secs(value * 60 * 60 * 24 * 7),
-            TimeUnit::Month => Duration::from_secs(value * 60 * 60 * 24 * 30), // Приблизительно
+            TimeUnit::Month => Duration::from_secs(value * 60 * 60 * 24 * 30), // Approximate
         }
     }
 
@@ -56,7 +56,7 @@ impl TimeUnit {
         (nanos / target_unit.to_nanos(1)) as u64
     }
 
-    // Быстрые специализированные методы
+    // Fast specialized helpers
     #[inline]
     pub const fn to_micros(&self, value: u64) -> u64 {
         self.convert(value, TimeUnit::Micros)
@@ -73,15 +73,15 @@ impl TimeUnit {
     }
 
     pub fn ts_to_dt_auto(timestamp: i64) -> String {
-        // Определяем наиболее вероятные единицы измерения по величине значения
+        // Infer most likely unit based on magnitude
         let unit = if timestamp > 253_402_300_799_000_000 {
-            // ~10000 год в наносекундах
+            // ~year 10000 in nanoseconds
             TimeUnit::Nanos
         } else if timestamp > 253_402_300_799_000 {
-            // ~10000 год в микросекундах
+            // ~year 10000 in microseconds
             TimeUnit::Micros
         } else if timestamp > 253_402_300_799 {
-            // ~10000 год в миллисекундах
+            // ~year 10000 in milliseconds
             TimeUnit::Millis
         } else {
             TimeUnit::Second
@@ -90,7 +90,7 @@ impl TimeUnit {
         unit.ts_to_dt(timestamp)
     }
 
-    /// Преобразует UNIX-время в читаемый формат с указанием единиц измерения
+    /// Convert UNIX timestamp to a human-readable string using the specified unit
     pub fn ts_to_dt(&self, timestamp: i64) -> String {
         match self {
             TimeUnit::Nanos => DateTime::from_timestamp_nanos(timestamp)
@@ -125,7 +125,7 @@ impl TimeUnit {
                 .format("%Y-%m-%d %H:%M:%S")
                 .to_string(),
             TimeUnit::Month => {
-                DateTime::from_timestamp(timestamp * 2_592_000, 0) // Примерно 30 дней
+                DateTime::from_timestamp(timestamp * 2_592_000, 0) // Approximately 30 days
                     .unwrap()
                     .format("%Y-%m-%d %H:%M:%S")
                     .to_string()

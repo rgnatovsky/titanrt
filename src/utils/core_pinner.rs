@@ -28,8 +28,8 @@ impl CorePickPolicy {
 
 #[derive(Debug)]
 pub struct PerCore {
-    pub active_threads: AtomicU32, // сколько OS-потоков приклеено
-    pub last_spawn_ns: AtomicU64,  // для простых эвристик свежести
+    pub active_threads: AtomicU32, // number of OS threads pinned
+    pub last_spawn_ns: AtomicU64,  // for simple freshness heuristics
 }
 
 impl PerCore {
@@ -79,7 +79,7 @@ impl CoreStats {
         specific_core_ids: Vec<usize>,
         reserved_core_ids: Vec<usize>,
     ) -> anyhow::Result<Arc<Self>> {
-        // 1) Список доступных id от ОС
+        // 1) List of available core ids reported by the OS
         let sys = core_affinity::get_core_ids()
             .context("core_affinity::get_core_ids() failed or returned None")?;
         if sys.is_empty() {
@@ -91,7 +91,7 @@ impl CoreStats {
             .map(|c| c.id)
             .collect();
 
-        // Для проверки существования
+        // For existence checking
         let mut is_sys = vec![false; sys_ids.iter().copied().max().unwrap_or(0) + 1];
         for &id in &sys_ids {
             if id >= is_sys.len() {
@@ -100,9 +100,9 @@ impl CoreStats {
             is_sys[id] = true;
         }
 
-        // 2) Сформировать selected_ids
+        // 2) Build selected_ids
         let mut selected_ids: Vec<usize> = if !specific_core_ids.is_empty() {
-            // приоритет у списка пользователя: фильтруем несуществующие и дубли
+            // prioritize user list: filter non-existent ids and duplicates
             let mut seen = vec![false; is_sys.len()];
             let mut out = Vec::with_capacity(specific_core_ids.len());
             for id in specific_core_ids.iter() {
@@ -119,11 +119,11 @@ impl CoreStats {
             }
             out
         } else {
-            // берём все системные
+            // take all system cores
             sys_ids.clone()
         };
 
-        // 3) Применить ограничение только если specific_cores пуст
+        // 3) Apply limit only if specific_cores is empty
         if specific_core_ids.is_empty()
             && let Some(max_n) = default_max_cores
             && max_n > 0
