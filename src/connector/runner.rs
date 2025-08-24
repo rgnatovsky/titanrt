@@ -1,4 +1,5 @@
 use crate::connector::errors::StreamResult;
+use crate::connector::hook::IntoHook;
 use crate::connector::StreamDescriptor;
 use crate::io::base::{BaseTx, TxPairExt};
 use crate::utils::*;
@@ -9,21 +10,22 @@ use std::sync::Arc;
 /// Bundles together the descriptor, config, typed channels,
 /// shared state, cancel token, and health flag. This is the
 /// handle a [`StreamRunner`] implementation uses inside `run()`.
-pub struct RuntimeCtx<D, R, E, S>
-    where
-       D: StreamDescriptor,
-       R: StreamRunner<D, E, S>,
-       S: StateMarker,
-       E: BaseTx,
+pub struct RuntimeCtx<C, D, A, E, S>
+where
+    C: Send + 'static,
+    D: StreamDescriptor,
+    A: BaseTx + TxPairExt,
+    S: StateMarker,
+    E: BaseTx,
 {
     /// Stream descriptor (venue, kind, bounds, policy).
     pub desc: D,
     /// Per-stream config built by the runner.
-    pub cfg: R::Config,
+    pub cfg: C,
     /// Shared state snapshot cell.
     pub state: Arc<StateCell<S>>,
     /// Channel for actions coming from the model/user.
-    pub action_rx: <R::ActionTx as TxPairExt>::RxHalf,
+    pub action_rx: <A as TxPairExt>::RxHalf,
     /// Channel for events going back to the model/user.
     pub event_tx: E,
     /// Cancellation token (child of connector/runtime root).
@@ -32,19 +34,20 @@ pub struct RuntimeCtx<D, R, E, S>
     pub health: HealthFlag,
 }
 
-impl<D, R, E, S> RuntimeCtx<D, R, E, S>
-    where
-       D: StreamDescriptor,
-       R: StreamRunner<D, E, S>,
-       S: StateMarker,
-       E: BaseTx,
+impl<C, D, A, E, S> RuntimeCtx<C, D, A, E, S>
+where
+    C: Send + 'static,
+    D: StreamDescriptor,
+    A: BaseTx + TxPairExt,
+    S: StateMarker,
+    E: BaseTx,
 {
     /// Construct a new runtime context.
     #[inline]
     pub fn new(
-        ctx: R::Config,
+        cfg: C,
         desc: D,
-        action_rx: <R::ActionTx as TxPairExt>::RxHalf,
+        action_rx: <A as TxPairExt>::RxHalf,
         event_tx: E,
         state: Arc<StateCell<S>>,
         cancel: CancelToken,
@@ -52,7 +55,7 @@ impl<D, R, E, S> RuntimeCtx<D, R, E, S>
     ) -> Self {
         Self {
             desc,
-            cfg: ctx,
+            cfg,
             action_rx,
             event_tx,
             state,
@@ -67,10 +70,10 @@ impl<D, R, E, S> RuntimeCtx<D, R, E, S>
 /// A `StreamRunner` defines how to build a per-stream config
 /// and how to run the worker loop given a [`RuntimeCtx`].
 pub trait StreamRunner<D, E, S>: Sized + Send + 'static
-    where
-       D: StreamDescriptor,
-       S: StateMarker,
-       E: BaseTx,
+where
+    D: StreamDescriptor,
+    S: StateMarker,
+    E: BaseTx,
 {
     /// Config type built from the descriptor (passed into the context).
     type Config: Send + 'static;
@@ -78,12 +81,14 @@ pub trait StreamRunner<D, E, S>: Sized + Send + 'static
     type ActionTx: BaseTx + TxPairExt;
     /// Raw events produced inside the worker loop.
     type RawEvent: Send + 'static;
-    /// Hook to translate raw events into typed events/state updates.
-    type Hook: Fn(&Self::RawEvent, &mut E, &StateCell<S>) + Send + 'static;
+    /// Hook result type.
+    type HookResult;
 
     /// Build a per-stream config from the descriptor.
     fn build_config(&mut self, desc: &D) -> anyhow::Result<Self::Config>;
 
     /// Run the worker loop with the given context and event hook.
-    fn run(ctx: RuntimeCtx<D, Self, E, S>, hook: Self::Hook) -> StreamResult<()>;
+    fn run<H>(ctx: RuntimeCtx<Self::Config, D, Self::ActionTx, E, S>, hook: H) -> StreamResult<()>
+    where
+        H: IntoHook<Self::RawEvent, E, S, D, Self::HookResult>;
 }

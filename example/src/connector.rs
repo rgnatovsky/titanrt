@@ -3,11 +3,12 @@ use std::fmt::Display;
 use std::sync::Arc;
 use titanrt::connector::errors::StreamResult;
 use titanrt::connector::{
-    BaseConnector, Kind, RuntimeCtx, StreamDescriptor, StreamRunner, StreamSpawner, Venue,
+    BaseConnector, Hook, HookArgs, IntoHook, Kind, RuntimeCtx, StreamDescriptor, StreamRunner,
+    StreamSpawner, Venue,
 };
 use titanrt::io::ringbuffer::RingSender;
 use titanrt::prelude::{BaseRx, BaseTx, TxPairExt};
-use titanrt::utils::{CancelToken, CorePickPolicy, CoreStats, StateCell, StateMarker};
+use titanrt::utils::{CancelToken, CorePickPolicy, CoreStats, StateMarker};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CompositeConfig {
@@ -23,10 +24,10 @@ pub struct CompositeConnector {
 }
 
 impl BaseConnector for CompositeConnector {
-    type Config = CompositeConfig;
+    type MainConfig = CompositeConfig;
 
     fn init(
-        config: Self::Config,
+        config: Self::MainConfig,
         cancel_token: CancelToken,
         reserved_core_ids: Option<Vec<usize>>,
     ) -> anyhow::Result<Self> {
@@ -51,7 +52,7 @@ impl BaseConnector for CompositeConnector {
         "CompositeConnector"
     }
 
-    fn config(&self) -> &Self::Config {
+    fn config(&self) -> &Self::MainConfig {
         &self.config
     }
 
@@ -135,16 +136,22 @@ where
     type Config = ();
     type ActionTx = RingSender<CounterAction>;
     type RawEvent = CounterEvent;
-    type Hook = fn(&CounterEvent, &mut E, &StateCell<S>);
+    type HookResult = u64;
+    // type Hook = fn(&CounterEvent, &mut E, &StateCell<S>);
 
     fn build_config(&mut self, _desc: &CounterDescriptor) -> anyhow::Result<Self::Config> {
         Ok(())
     }
 
-    fn run(
-        mut ctx: RuntimeCtx<CounterDescriptor, Self, E, S>,
-        hook: Self::Hook,
-    ) -> StreamResult<()> {
+    fn run<H>(
+        mut ctx: RuntimeCtx<Self::Config, CounterDescriptor, Self::ActionTx, E, S>,
+        hook: H,
+    ) -> StreamResult<()>
+    where
+        H: IntoHook<Self::RawEvent, E, S, CounterDescriptor, Self::HookResult>,
+    {
+        let mut hook = hook.into_hook();
+
         let start_at = std::time::Instant::now();
         let mut event = CounterEvent { actions_sum: 0 };
         let sleeping_interval = ctx.desc.sleep_interval_sec;
@@ -158,7 +165,9 @@ where
                 break;
             }
 
-            hook(&event, &mut ctx.event_tx, &ctx.state);
+            let hook_args = HookArgs::new(&event, &mut ctx.event_tx, &ctx.state, &ctx.desc);
+
+            hook.call(hook_args);
 
             while let Ok(action) = ctx.action_rx.try_recv() {
                 event.actions_sum += action.val;

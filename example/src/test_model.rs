@@ -4,11 +4,11 @@ use crate::connector::{
 use anyhow::anyhow;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use titanrt::connector::{BaseConnector, Stream};
+use titanrt::connector::{BaseConnector, HookArgs, Stream};
 use titanrt::control::inputs::InputMeta;
 use titanrt::io::ringbuffer::{RingReceiver, RingSender};
 use titanrt::prelude::*;
-use titanrt::utils::{CancelToken, CorePickPolicy, StateCell, StateMarker};
+use titanrt::utils::{CancelToken, CorePickPolicy, StateMarker};
 
 #[derive(Default)]
 pub struct CounterState {
@@ -35,12 +35,10 @@ pub struct TestModelContext {
 
 impl ModelContext for TestModelContext {}
 
-fn my_counter_hook(e: &CounterEvent, tx: &mut RingSender<u64>, s: &StateCell<CounterState>) {
-    let _s_now = s.peek();
-    tx.try_send(e.actions_sum).ok();
-    s.publish(CounterState {
-        _calls: e.actions_sum,
-    });
+fn my_counter_hook(args: HookArgs<CounterEvent, RingSender<u64>, CounterState, CounterDescriptor>) -> u64 {
+    let tx = args.event_tx;
+    tx.try_send(5).ok();
+    1
 }
 
 impl BaseModel for TestModel {

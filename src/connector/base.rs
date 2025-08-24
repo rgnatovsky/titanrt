@@ -1,3 +1,4 @@
+use crate::connector::hook::IntoHook;
 use crate::connector::{Stream, StreamDescriptor, StreamSpawner};
 use crate::io::base::{BaseTx, TxPairExt};
 use crate::utils::*;
@@ -19,11 +20,11 @@ use std::sync::Arc;
 ///   into the spawner so each stream can be cancelled/pinned independently.
 pub trait BaseConnector: Sized + Send + 'static {
     /// Connector configuration type (serde-deserializable).
-    type Config: Clone + Send + for<'a> Deserialize<'a> + 'static;
+    type MainConfig: Clone + Send + for<'a> Deserialize<'a> + 'static;
 
     /// Construct the connector with a root cancel token and optional reserved cores.
     fn init(
-        config: Self::Config,
+        config: Self::MainConfig,
         cancel_token: CancelToken,
         reserved_core_ids: Option<Vec<usize>>,
     ) -> anyhow::Result<Self>;
@@ -32,7 +33,7 @@ pub trait BaseConnector: Sized + Send + 'static {
     fn name(&self) -> impl AsRef<str> + Display;
 
     /// Access the immutable configuration.
-    fn config(&self) -> &Self::Config;
+    fn config(&self) -> &Self::MainConfig;
 
     /// Root cancel token; streams will receive a child token.
     fn cancel_token(&self) -> &CancelToken;
@@ -48,16 +49,17 @@ pub trait BaseConnector: Sized + Send + 'static {
     /// - `desc`: stream descriptor (venue/kind/bounds/core policy).
     /// - `hook`: translation callback from raw messages to typed events.
     /// - Returns a `Stream` exposing action TX, event RX, health, cancel, and join.
-    fn spawn_stream<D, E, S>(
+    fn spawn_stream<D, E, S, H>(
         &mut self,
         desc: D,
-        hook: Self::Hook,
+        hook: H,
     ) -> anyhow::Result<Stream<Self::ActionTx, E::RxHalf, S>>
     where
         Self: StreamSpawner<D, E, S>,
         D: StreamDescriptor,
         S: StateMarker,
         E: BaseTx + TxPairExt,
+        H: IntoHook<Self::RawEvent, E, S, D, Self::HookResult>,
     {
         <Self as StreamSpawner<D, E, S>>::spawn(
             self,
@@ -101,7 +103,7 @@ where
     }
 
     pub fn init(
-        config: T::Config,
+        config: T::MainConfig,
         cancel_token: CancelToken,
         reserved_core_ids: Option<Vec<usize>>,
     ) -> anyhow::Result<Self> {
@@ -122,7 +124,7 @@ where
         self.0.name()
     }
 
-    pub fn config(&self) -> &T::Config {
+    pub fn config(&self) -> &T::MainConfig {
         self.0.config()
     }
 }

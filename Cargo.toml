@@ -1,6 +1,6 @@
 [package]
 name = "titanrt"
-version = "0.1.4"
+version = "0.2.0"
 edition = "2024"
 authors = ["Ruslan Gnatovsky <rgnatovsky@gmail.com>"]
 description = "Typed reactive runtime for real-time systems"
@@ -35,4 +35,5 @@ name = "runtime_hot_loop"
 harness = false
 
 [features]
+default = ["connector"]
 connector = []

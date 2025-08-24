@@ -1,6 +1,6 @@
 use crate::config::RuntimeConfig;
 use crate::control::controller::{Controller, ControllerResult};
-use crate::control::inputs::{CommandInput, Input, InputPayload};
+use crate::control::inputs::{CommandInput, Input};
 use crate::io::base::BaseTx;
 use crate::io::ringbuffer::{RingBuffer, RingSender};
 use crate::model::{BaseModel, ExecutionResult, Output, StopKind};
