@@ -68,3 +68,61 @@ pub trait BaseConnector: Sized + Send + 'static {
         )
     }
 }
+
+pub struct AnyConnector<T>(pub T)
+where
+    T: BaseConnector;
+
+impl<T> std::ops::Deref for AnyConnector<T>
+where
+    T: BaseConnector,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl<T> std::ops::DerefMut for AnyConnector<T>
+where
+    T: BaseConnector,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<T> AnyConnector<T>
+where
+    T: BaseConnector,
+{
+    pub fn new(inner: T) -> Self {
+        Self(inner)
+    }
+
+    pub fn init(
+        config: T::Config,
+        cancel_token: CancelToken,
+        reserved_core_ids: Option<Vec<usize>>,
+    ) -> anyhow::Result<Self> {
+        T::init(config, cancel_token, reserved_core_ids).map(Self)
+    }
+
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+    pub fn inner(&self) -> &T {
+        &self.0
+    }
+    pub fn inner_mut(&mut self) -> &mut T {
+        &mut self.0
+    }
+
+    pub fn name(&self) -> impl AsRef<str> + Display {
+        self.0.name()
+    }
+
+    pub fn config(&self) -> &T::Config {
+        self.0.config()
+    }
+}

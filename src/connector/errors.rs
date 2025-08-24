@@ -38,3 +38,9 @@ impl fmt::Display for StreamError {
 }
 
 impl Error for StreamError {}
+
+impl From<anyhow::Error> for StreamError {
+    fn from(err: anyhow::Error) -> Self {
+        StreamError::Unknown(err)
+    }
+}
