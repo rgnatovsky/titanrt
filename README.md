@@ -5,10 +5,10 @@ Model-first, **typed reactive runtime** for real-time systems. The runtime focus
 * Predictable back-pressure via unified TX/RX traits.
 * Typed boundaries between model, I/O adapters and state.
 * Graceful, hierarchical cancellation and optional core pinning.
-* Hot-reload of configuration.
+* Hot-reload of configuration, but logic is still in the model and user depended on.
 * Health flags and lock-free state snapshots.
 * When using the built-in connector, a model-side hook selects which events are emitted.
-* The state payload is **user-defined**: you choose `T` for `StateCell<T>`.
+* This is related also to the state payload. It is **user-defined**: you choose `T` for `StateCell<T>`.
 
 ## Install
 
@@ -62,11 +62,16 @@ impl BaseModel for MyModel {
       ExecutionResult::Relax    // yield (spin/yield/sleep backoff)
    }
 
-   fn on_event(&mut self, _e: Self::Event) { /* handle external events */ }
+   fn on_event(&mut self, _e: Self::Event) { /* handle external events from outside of the runtime */ }
 
    fn stop(&mut self, _kind: StopKind) -> StopState {
       // cancel streams, join workers, flush state, etc.
       StopState::Done
+   }
+
+   fn hot_reload(&mut self, config: &Self::Config) -> Result<()> {
+      // reload configuration, apply changes, etc.
+      Ok(())
    }
 }
 
@@ -81,9 +86,9 @@ fn main() -> Result<()> {
 
    let ctx = AppCtx;
    let model_cfg = "hello".to_string();
-   let outputs = NullTx;
+   let output_tx = NullOutputTx;
 
-   Runtime::<MyModel>::spawn(cfg, ctx, model_cfg, outputs)?
+   Runtime::<MyModel>::spawn(cfg, ctx, model_cfg, output_tx)?
       .run_blocking()
 }
 ```
