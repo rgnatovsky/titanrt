@@ -3,6 +3,7 @@ pub use core_pinner::*;
 pub use health_flag::*;
 pub use state::*;
 
+pub mod backoff;
 mod cancel_token;
 mod core_pinner;
 mod health_flag;

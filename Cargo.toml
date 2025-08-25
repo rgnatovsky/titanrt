@@ -1,6 +1,6 @@
 [package]
 name = "titanrt"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 authors = ["Ruslan Gnatovsky <rgnatovsky@gmail.com>"]
 description = "Typed reactive runtime for real-time systems"
@@ -26,6 +26,7 @@ ahash = "0.8.12"
 signal-hook = "0.3.18"
 chrono = "0.4.41"
 regex = "1.11.1"
+rand = "0.9.2"
 
 [dev-dependencies]
 criterion = "0.7.0"

@@ -1,6 +1,6 @@
 use crate::connector::StreamDescriptor;
 use crate::prelude::BaseTx;
-use crate::utils::{StateCell, StateMarker};
+use crate::utils::{HealthFlag, StateCell, StateMarker};
 
 #[non_exhaustive]
 pub struct HookArgs<'a, Ev, EvTx, State, Desc>
@@ -14,6 +14,7 @@ where
     pub event_tx: &'a mut EvTx,
     pub state: &'a StateCell<State>,
     pub desc: &'a Desc,
+    pub health: &'a HealthFlag,
 }
 
 impl<'a, Ev, EvTx, State, Desc> HookArgs<'a, Ev, EvTx, State, Desc>
@@ -29,12 +30,14 @@ where
         event_tx: &'a mut EvTx,
         state: &'a StateCell<State>,
         desc: &'a Desc,
+        health: &'a HealthFlag,
     ) -> Self {
         Self {
             raw,
             event_tx,
             state,
             desc,
+            health,
         }
     }
 }

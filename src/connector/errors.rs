@@ -15,6 +15,7 @@ pub enum StreamError {
     Unhealthy,
     WebSocket(anyhow::Error),
     Unimplemented,
+    Reconnect(anyhow::Error),
     Unknown(anyhow::Error),
 }
 
@@ -33,6 +34,7 @@ impl fmt::Display for StreamError {
             Self::Unimplemented => write!(f, "unimplemented"),
             Self::WebSocket(s) => write!(f, "websocket error: {s}"),
             Self::Unknown(err) => write!(f, "unknown error: {err}"),
+            Self::Reconnect(err) => write!(f, "reconnect error: {err}"),
         }
     }
 }

@@ -165,7 +165,13 @@ where
                 break;
             }
 
-            let hook_args = HookArgs::new(&event, &mut ctx.event_tx, &ctx.state, &ctx.desc);
+            let hook_args = HookArgs::new(
+                &event,
+                &mut ctx.event_tx,
+                &ctx.state,
+                &ctx.desc,
+                &ctx.health,
+            );
 
             hook.call(hook_args);
 
