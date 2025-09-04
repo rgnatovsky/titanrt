@@ -2,6 +2,7 @@
 use ahash::AHashMap;
 use anyhow::Context;
 use crossbeam::utils::CachePadded;
+use serde::Deserialize;
 use std::ops::Deref;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{
@@ -10,7 +11,8 @@ use std::{
 };
 use core_affinity::{get_core_ids, set_for_current, CoreId};
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CorePickPolicy {
     MinimumThreads,
     RoundRobin,

@@ -25,7 +25,7 @@ pub struct TestModel {
     last_seq: u64,
     stream: Stream<RingSender<CounterAction>, RingReceiver<u64>, CounterState>,
     count: u64,
-    ctx: TestModelContext,
+    ctx: NullModelCtx,
 }
 
 #[derive(Default, Clone)]
@@ -35,7 +35,16 @@ pub struct TestModelContext {
 
 impl ModelContext for TestModelContext {}
 
-fn my_counter_hook(args: HookArgs<CounterEvent, RingSender<u64>, CounterState, CounterDescriptor>) -> u64 {
+pub(crate) fn my_counter_hook(args: HookArgs<CounterEvent, RingSender<u64>, CounterState, CounterDescriptor>) -> u64 {
+
+    let depth_parsed = args.raw;
+
+   args.state.publish(crate::test_model::CounterState {
+       _calls: depth_parsed.actions_sum,
+   });
+
+   args.event_tx.try_send(depth_parsed.actions_sum).ok();
+
     let tx = args.event_tx;
     tx.try_send(5).ok();
     1
@@ -46,7 +55,7 @@ impl BaseModel for TestModel {
     type OutputTx = NullOutputTx;
     type OutputEvent = ();
     type Event = NullEvent;
-    type Ctx = TestModelContext;
+    type Ctx = NullModelCtx;
 
     fn initialize(
         ctx: Self::Ctx,
@@ -82,7 +91,7 @@ impl BaseModel for TestModel {
             stream,
             last_seq: 0,
             count: 0,
-            ctx,
+            ctx: NullModelCtx,
         })
     }
 
@@ -117,10 +126,10 @@ impl BaseModel for TestModel {
     fn on_event(&mut self, _event: Self::Event, _meta: Option<InputMeta>) {}
 
     fn stop(&mut self, _stop_kind: StopKind) -> StopState {
-        tracing::info!(
-            "test model stopped, events count: {}",
-            self.ctx.count.lock().unwrap().to_string()
-        );
+        // tracing::info!(
+        //     "test model stopped, events count: {}",
+        //     self.ctx.count.lock().unwrap().to_string()
+        // );
 
         StopState::Done
     }

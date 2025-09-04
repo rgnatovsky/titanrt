@@ -1,9 +1,8 @@
 mod connector;
 mod test_model;
+mod model2;
 
-use crate::test_model::{TestModel, TestModelContext};
-use crossbeam::channel::bounded;
-use std::sync::{Arc, Mutex};
+use crate::test_model::TestModel;
 use titanrt::config::RuntimeConfig;
 use titanrt::prelude::*;
 use tracing::Level;
@@ -27,24 +26,22 @@ pub fn main() {
 
     let cfg = RuntimeConfig {
         init_model_on_start: true,
-        core_id: Some(8),
+        core_id: Some(7),
         max_inputs_pending: Some(128),
         max_inputs_drain: None,
         stop_model_timeout: Some(5),
     };
 
-    let (_outputs, _) = bounded::<Output<NullEvent>>(100);
-
-    let model_ctx = TestModelContext {
-        count: Arc::new(Mutex::new(0)),
-    };
+    let model_cfg = "test_model_cfg_string".to_string();
 
     let rt = Runtime::<TestModel>::spawn(
         cfg,
-        model_ctx,
-        "test_model_cfg_string".to_string(),
+        NullModelCtx,
+        model_cfg,
         NullOutputTx,
-    );
+    ).unwrap();
 
-    rt.unwrap().run_blocking().unwrap()
+
+
+    rt.run_blocking().unwrap()
 }
