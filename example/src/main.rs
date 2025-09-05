@@ -1,8 +1,8 @@
 mod connector;
 mod test_model;
-mod model2;
+mod test_model_2;
 
-use crate::test_model::TestModel;
+use crate::test_model_2::{TestModel2, TestModel2Config};
 use titanrt::config::RuntimeConfig;
 use titanrt::prelude::*;
 use tracing::Level;
@@ -32,16 +32,9 @@ pub fn main() {
         stop_model_timeout: Some(5),
     };
 
-    let model_cfg = "test_model_cfg_string".to_string();
+    let model_cfg = TestModel2Config {};
 
-    let rt = Runtime::<TestModel>::spawn(
-        cfg,
-        NullModelCtx,
-        model_cfg,
-        NullOutputTx,
-    ).unwrap();
-
-
+    let rt = Runtime::<TestModel2>::spawn(cfg, NullModelCtx, model_cfg, NullOutputTx).unwrap();
 
     rt.run_blocking().unwrap()
 }

@@ -11,3 +11,4 @@ mod hook;
 mod runner;
 mod spawner;
 mod stream;
+pub mod features;
