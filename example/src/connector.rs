@@ -8,7 +8,7 @@ use titanrt::connector::{
 };
 use titanrt::io::ringbuffer::RingSender;
 use titanrt::prelude::{BaseRx, BaseTx, TxPairExt};
-use titanrt::utils::{CancelToken, CorePickPolicy, CoreStats, StateMarker};
+use titanrt::utils::{CancelToken, CorePickPolicy, CoreStats, Reducer, StateMarker};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CompositeConfig {
@@ -121,17 +121,19 @@ impl StreamDescriptor for CounterDescriptor {
     }
 }
 
-impl<E, S> StreamSpawner<CounterDescriptor, E, S> for CompositeConnector
+impl<E, R, S> StreamSpawner<CounterDescriptor, E, R, S> for CompositeConnector
 where
     S: StateMarker,
     E: BaseTx + TxPairExt,
+    R: Reducer,
 {
 }
 
-impl<E, S> StreamRunner<CounterDescriptor, E, S> for CompositeConnector
+impl<E, R, S> StreamRunner<CounterDescriptor, E, R, S> for CompositeConnector
 where
     E: BaseTx,
     S: StateMarker,
+    R: Reducer,
 {
     type Config = ();
     type ActionTx = RingSender<CounterAction>;
@@ -144,11 +146,11 @@ where
     }
 
     fn run<H>(
-        mut ctx: RuntimeCtx<Self::Config, CounterDescriptor, Self::ActionTx, E, S>,
+        mut ctx: RuntimeCtx<Self::Config, CounterDescriptor, Self::ActionTx, E, R, S>,
         hook: H,
     ) -> StreamResult<()>
     where
-        H: IntoHook<Self::RawEvent, E, S, CounterDescriptor, Self::HookResult>,
+        H: IntoHook<Self::RawEvent, E, R, S, CounterDescriptor, Self::HookResult>,
     {
         let mut hook = hook.into_hook();
 
@@ -168,6 +170,7 @@ where
             let hook_args = HookArgs::new(
                 &event,
                 &mut ctx.event_tx,
+                &mut ctx.reducer,
                 &ctx.state,
                 &ctx.desc,
                 &ctx.health,

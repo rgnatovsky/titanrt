@@ -49,19 +49,20 @@ pub trait BaseConnector: Sized + Send + 'static {
     /// - `desc`: stream descriptor (venue/kind/bounds/core policy).
     /// - `hook`: translation callback from raw messages to typed events.
     /// - Returns a `Stream` exposing action TX, event RX, health, cancel, and join.
-    fn spawn_stream<D, E, S, H>(
+    fn spawn_stream<D, E, R, S, H>(
         &mut self,
         desc: D,
         hook: H,
     ) -> anyhow::Result<Stream<Self::ActionTx, E::RxHalf, S>>
     where
-        Self: StreamSpawner<D, E, S>,
+        Self: StreamSpawner<D, E, R, S>,
         D: StreamDescriptor,
         S: StateMarker,
         E: BaseTx + TxPairExt,
-        H: IntoHook<Self::RawEvent, E, S, D, Self::HookResult>,
+        H: IntoHook<Self::RawEvent, E, R, S, D, Self::HookResult>,
+        R: Reducer,
     {
-        <Self as StreamSpawner<D, E, S>>::spawn(
+        <Self as StreamSpawner<D, E, R, S>>::spawn(
             self,
             desc,
             hook,

@@ -1,8 +1,17 @@
 // yellowstone_grpc
 use arc_swap::ArcSwap;
 use crossbeam::utils::CachePadded;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
+/// Marker trait for state reducers.
+/// Must be `Send + 'static + Default`.
+pub trait Reducer: Send + 'static + Default {}
+
+/// Empty reducer for cases where no internal state is needed.
+#[derive(Default)]
+pub struct NullReducer;
+impl Reducer for NullReducer {}
 
 /// Marker trait for state snapshots stored in [`StateCell`].
 /// Must be `Send + Sync + Default + 'static`.

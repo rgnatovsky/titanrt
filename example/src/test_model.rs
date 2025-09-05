@@ -8,7 +8,7 @@ use titanrt::connector::{BaseConnector, HookArgs, Stream};
 use titanrt::control::inputs::InputMeta;
 use titanrt::io::ringbuffer::{RingReceiver, RingSender};
 use titanrt::prelude::*;
-use titanrt::utils::{CancelToken, CorePickPolicy, StateMarker};
+use titanrt::utils::{CancelToken, CorePickPolicy, NullReducer, StateMarker};
 
 #[derive(Default)]
 pub struct CounterState {
@@ -25,7 +25,7 @@ pub struct TestModel {
     last_seq: u64,
     stream: Stream<RingSender<CounterAction>, RingReceiver<u64>, CounterState>,
     count: u64,
-    ctx: NullModelCtx,
+    _ctx: NullModelCtx,
 }
 
 #[derive(Default, Clone)]
@@ -35,15 +35,16 @@ pub struct TestModelContext {
 
 impl ModelContext for TestModelContext {}
 
-pub(crate) fn my_counter_hook(args: HookArgs<CounterEvent, RingSender<u64>, CounterState, CounterDescriptor>) -> u64 {
-
+pub(crate) fn my_counter_hook(
+    args: HookArgs<CounterEvent, RingSender<u64>, NullReducer, CounterState, CounterDescriptor>,
+) -> u64 {
     let depth_parsed = args.raw;
 
-   args.state.publish(crate::test_model::CounterState {
-       _calls: depth_parsed.actions_sum,
-   });
+    args.state.publish(crate::test_model::CounterState {
+        _calls: depth_parsed.actions_sum,
+    });
 
-   args.event_tx.try_send(depth_parsed.actions_sum).ok();
+    args.event_tx.try_send(depth_parsed.actions_sum).ok();
 
     let tx = args.event_tx;
     tx.try_send(5).ok();
@@ -58,7 +59,7 @@ impl BaseModel for TestModel {
     type Ctx = NullModelCtx;
 
     fn initialize(
-        ctx: Self::Ctx,
+        _ctx: Self::Ctx,
         config: Self::Config,
         pinned_core_id: Option<usize>,
         outputs: NullOutputTx,
@@ -91,7 +92,7 @@ impl BaseModel for TestModel {
             stream,
             last_seq: 0,
             count: 0,
-            ctx: NullModelCtx,
+            _ctx: NullModelCtx,
         })
     }
 

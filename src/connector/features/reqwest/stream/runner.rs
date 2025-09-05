@@ -7,7 +7,7 @@ use crate::connector::features::reqwest::stream::event::ReqwestEvent;
 use crate::connector::{Hook, HookArgs, IntoHook, RuntimeCtx, StreamRunner, StreamSpawner};
 use crate::io::ringbuffer::RingSender;
 use crate::prelude::{BaseRx, TxPairExt};
-use crate::utils::StateMarker;
+use crate::utils::{Reducer, StateMarker};
 use ahash::AHashMap;
 use anyhow::anyhow;
 use crossbeam::channel::unbounded;
@@ -19,17 +19,19 @@ use tokio::sync::Mutex;
 use tokio::task::LocalSet;
 use tokio::time::sleep;
 
-impl<E, S> StreamSpawner<ReqwestStreamDescriptor, E, S> for ReqwestConnector
+impl<E, R, S> StreamSpawner<ReqwestStreamDescriptor, E, R, S> for ReqwestConnector
 where
     E: TxPairExt,
     S: StateMarker,
+    R: Reducer,
 {
 }
 
-impl<E, S> StreamRunner<ReqwestStreamDescriptor, E, S> for ReqwestConnector
+impl<E, R, S> StreamRunner<ReqwestStreamDescriptor, E, R, S> for ReqwestConnector
 where
     E: TxPairExt,
     S: StateMarker,
+    R: Reducer,
 {
     type Config = AHashMap<u16, Client>;
     type ActionTx = RingSender<ReqwestAction>;
@@ -39,7 +41,6 @@ where
     fn build_config(&mut self, _desc: &ReqwestStreamDescriptor) -> anyhow::Result<Self::Config> {
         Ok(self.clients_map().clone())
     }
-    
 
     fn run<H>(
         mut ctx: RuntimeCtx<
@@ -47,12 +48,13 @@ where
             ReqwestStreamDescriptor,
             RingSender<ReqwestAction>,
             E,
+            R,
             S,
         >,
         hook: H,
     ) -> StreamResult<()>
     where
-        H: IntoHook<ReqwestEvent, E, S, ReqwestStreamDescriptor, ()>,
+        H: IntoHook<ReqwestEvent, E, R, S, ReqwestStreamDescriptor, ()>,
         E: TxPairExt,
         S: StateMarker,
     {
@@ -139,6 +141,7 @@ where
                         hook.call(HookArgs::new(
                             &event,
                             &mut ctx.event_tx,
+                            &mut ctx.reducer,
                             &ctx.state,
                             &ctx.desc,
                             &mut ctx.health,

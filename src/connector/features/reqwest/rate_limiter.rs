@@ -238,7 +238,6 @@ pub(crate) struct BucketHandle {
     tx: mpsc::Sender<PermitReq>,
 }
 
-const MAX_AHEAD: Duration = Duration::from_secs(24 * 60 * 60); // 1 день, выбери под себя
 
 impl BucketHandle {
     pub async fn wait(&self, weight: u32) {

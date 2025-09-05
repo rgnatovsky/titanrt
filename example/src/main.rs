@@ -1,6 +1,6 @@
-mod connector;
-mod test_model;
-mod test_model_2;
+pub mod connector;
+pub mod test_model;
+pub mod test_model_2;
 
 use crate::test_model_2::{TestModel2, TestModel2Config};
 use titanrt::config::RuntimeConfig;

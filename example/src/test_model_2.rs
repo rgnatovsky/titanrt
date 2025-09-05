@@ -15,7 +15,7 @@ use titanrt::model::{ExecutionResult, NullEvent, NullModelCtx, NullOutputTx, Sto
 use titanrt::prelude::BaseModel;
 use titanrt::utils::time::timestamp::now_millis;
 use titanrt::utils::time::{TimeUnit, Timeframe};
-use titanrt::utils::{CancelToken, NullState};
+use titanrt::utils::{CancelToken, NullReducer, NullState};
 
 #[derive(Default, Deserialize, Clone)]
 pub struct TestModel2Config {}
@@ -116,7 +116,7 @@ impl BaseModel for TestModel2 {
     }
 }
 
-fn hook(args: HookArgs<ReqwestEvent, RingSender<bool>, NullState, ReqwestStreamDescriptor>) {
+fn hook(args: HookArgs<ReqwestEvent, RingSender<bool>, NullReducer, NullState, ReqwestStreamDescriptor>) {
     if args.raw.is_success() {
         println!("Received event at hook. Now {}", now_millis())
     } else {

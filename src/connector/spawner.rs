@@ -12,12 +12,13 @@ use uuid::Uuid;
 /// It allocates channels, state, health flag, applies core pinning policy,
 /// and starts the worker thread. The runner then executes its loop
 /// inside that thread with a [`RuntimeCtx`].
-pub trait StreamSpawner<D, E, S>
+pub trait StreamSpawner<D, E, R, S>
 where
-    Self: StreamRunner<D, E, S>,
+    Self: StreamRunner<D, E, R, S>,
     D: StreamDescriptor,
     S: StateMarker,
     E: BaseTx + TxPairExt,
+    R: Reducer,
 {
     /// Build a human-readable thread name from descriptor and UUID.
     fn thread_name(&self, desc: &D, id: Simple) -> String {
@@ -40,7 +41,7 @@ where
         core_stats: Option<Arc<CoreStats>>,
     ) -> anyhow::Result<Stream<Self::ActionTx, E::RxHalf, S>>
     where
-        H: IntoHook<Self::RawEvent, E, S, D, Self::HookResult>,
+        H: IntoHook<Self::RawEvent, E, R, S, D, Self::HookResult>,
     {
         // Per-stream config
         let ctx = match self.build_config(&desc) {
@@ -74,6 +75,7 @@ where
             E::unbound()
         };
 
+        let reducer = R::default();
         // Unique stream id
         let stream_id = Uuid::new_v4().simple();
 
@@ -86,6 +88,7 @@ where
                desc,
                action_rx,
                event_tx,
+               reducer,
                state.clone(),
                cancel.clone(),
                health.clone(),
