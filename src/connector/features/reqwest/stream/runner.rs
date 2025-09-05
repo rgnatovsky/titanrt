@@ -93,11 +93,12 @@ where
 
                 let req_id = action.req_id;
                 let rl_ctx = action.rl_ctx.take();
+                let label = action.label.take();
 
                 let request = match action.to_request_builder(&client).build() {
                     Ok(request) => request,
                     Err(e) => {
-                        let _ = res_tx.try_send(ReqwestEvent::from_error(e, req_id));
+                        let _ = res_tx.try_send(ReqwestEvent::from_error(e, req_id, label));
                         continue;
                     }
                 };
@@ -125,8 +126,8 @@ where
                     }
                     let out = client.execute(request).await;
                     let event = match out {
-                        Ok(resp) => ReqwestEvent::from_raw(resp, req_id).await,
-                        Err(e) => ReqwestEvent::from_error(e, req_id),
+                        Ok(resp) => ReqwestEvent::from_raw(resp, req_id, label).await,
+                        Err(e) => ReqwestEvent::from_error(e, req_id, label),
                     };
                     let _ = res_tx.try_send(event);
                 });

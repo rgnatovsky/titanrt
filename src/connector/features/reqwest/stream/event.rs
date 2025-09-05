@@ -6,17 +6,22 @@ use uuid::Uuid;
 
 #[derive(Debug)]
 pub struct ReqwestEvent {
-    req_id: Option<Uuid>,
     status: StatusCode,
     headers: HeaderMap,
     body: Option<Bytes>,
+    req_id: Option<Uuid>,
+    label: Option<&'static str>,
 }
 
 impl ReqwestEvent {
     /// Creates TcpResponse from hyper Response.
     /// Consumes the hyper response and collects its body.
 
-    pub async fn from_raw(resp: Response, req_id: Option<Uuid>) -> Self {
+    pub async fn from_raw(
+        resp: Response,
+        req_id: Option<Uuid>,
+        label: Option<&'static str>,
+    ) -> Self {
         let status = resp.status();
         let headers = resp.headers().clone();
 
@@ -26,10 +31,11 @@ impl ReqwestEvent {
             Err(e) => {
                 let body = Some(Bytes::from(e.to_string()));
                 return Self {
-                    req_id,
                     status: StatusCode::INTERNAL_SERVER_ERROR,
                     headers,
                     body,
+                    req_id,
+                    label,
                 };
             }
         };
@@ -39,10 +45,15 @@ impl ReqwestEvent {
             status,
             headers,
             body,
+            label,
         }
     }
 
-    pub fn from_error(error: reqwest::Error, req_id: Option<Uuid>) -> Self {
+    pub fn from_error(
+        error: reqwest::Error,
+        req_id: Option<Uuid>,
+        label: Option<&'static str>,
+    ) -> Self {
         let status = StatusCode::INTERNAL_SERVER_ERROR;
         let headers = HeaderMap::new();
         let body = Some(Bytes::from(error.to_string()));
@@ -51,6 +62,7 @@ impl ReqwestEvent {
             status,
             headers,
             body,
+            label,
         }
     }
 

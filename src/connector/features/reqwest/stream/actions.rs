@@ -55,30 +55,32 @@ impl ActionBody {
 /// Builder for constructing Action objects with a fluent API.
 #[derive(Debug)]
 pub struct ActionBuilder {
-    req_id: Option<Uuid>,
-    ip_id: Option<u16>,
-    rl_ctx: Option<Bytes>,
     method: Method,
     url: Url,
-    headers: HeaderMap,
-    timeout: Option<Duration>,
     body: ActionBody,
     query: Vec<(String, String)>,
+    headers: HeaderMap,
+    timeout: Option<Duration>,
+    req_id: Option<Uuid>,
+    label: Option<&'static str>,
+    ip_id: Option<u16>,
+    rl_ctx: Option<Bytes>,
 }
 
 impl ActionBuilder {
     /// Creates a new builder with the given HTTP method and URL.
     pub fn new(method: Method, url: Url) -> Self {
         Self {
-            req_id: None,
-            ip_id: None,
-            rl_ctx: None,
             method,
             url,
-            headers: HeaderMap::new(),
-            timeout: None,
             body: ActionBody::Empty,
             query: Vec::new(),
+            headers: HeaderMap::new(),
+            req_id: None,
+            label: None,
+            ip_id: None,
+            rl_ctx: None,
+            timeout: None,
         }
     }
 
@@ -141,6 +143,12 @@ impl ActionBuilder {
         self
     }
 
+    /// Sets a label for the request.
+    pub fn label(mut self, label: &'static str) -> Self {
+        self.label = Some(label);
+        self
+    }
+
     /// Sets an empty body.
     pub fn empty(mut self) -> Self {
         self.body = ActionBody::Empty;
@@ -200,6 +208,7 @@ impl ActionBuilder {
             ip_id: self.ip_id,
             method: self.method,
             rl_ctx: self.rl_ctx,
+            label: self.label,
             url: self.url,
             headers: self.headers,
             timeout: self.timeout,
@@ -211,15 +220,16 @@ impl ActionBuilder {
 
 #[derive(Debug, Clone)]
 pub struct ReqwestAction {
-    pub req_id: Option<Uuid>,
-    pub ip_id: Option<u16>,
-    pub rl_ctx: Option<Bytes>,
     pub method: Method,
     pub url: Url,
-    pub headers: HeaderMap,
-    pub timeout: Option<Duration>,
     pub body: ActionBody,
     pub query: Vec<(String, String)>,
+    pub headers: HeaderMap,
+    pub req_id: Option<Uuid>,
+    pub label: Option<&'static str>,
+    pub ip_id: Option<u16>,
+    pub rl_ctx: Option<Bytes>,
+    pub timeout: Option<Duration>,
 }
 
 impl ReqwestAction {
