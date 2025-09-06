@@ -65,6 +65,7 @@ pub struct ActionBuilder {
     label: Option<&'static str>,
     ip_id: Option<u16>,
     rl_ctx: Option<Bytes>,
+    rl_weight: Option<usize>,
     payload: Option<Value>
 }
 
@@ -81,6 +82,7 @@ impl ActionBuilder {
             label: None,
             ip_id: None,
             rl_ctx: None,
+            rl_weight: None,
             timeout: None,
             payload: None,
         }
@@ -206,6 +208,10 @@ impl ActionBuilder {
         self.rl_ctx = Some(ctx);
         self
     }
+    pub fn rl_weight(mut self, weight: usize) -> Self {
+        self.rl_weight = Some(weight);
+        self
+    }
 
     /// Builds and returns the final Action.
     pub fn build(self) -> ReqwestAction {
@@ -214,6 +220,7 @@ impl ActionBuilder {
             ip_id: self.ip_id,
             method: self.method,
             rl_ctx: self.rl_ctx,
+            rl_weight: self.rl_weight,
             label: self.label,
             url: self.url,
             headers: self.headers,
@@ -236,6 +243,7 @@ pub struct ReqwestAction {
     pub label: Option<&'static str>,
     pub ip_id: Option<u16>,
     pub rl_ctx: Option<Bytes>,
+    pub rl_weight: Option<usize>,
     pub timeout: Option<Duration>,
     pub payload: Option<Value>
 }

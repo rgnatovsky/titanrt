@@ -75,9 +75,16 @@ pub struct RateLimitRule {
     /// Cost of a single event relative to the budget (default: 1).
     #[serde(default = "default_weight")]
     pub weight: u64,
+    /// Whether the weight can be overridden by the user.
+    #[serde(default = "default_can_override_weight")]
+    pub can_override_weight: bool,
     /// Precomputed cache key used by the limiter; not deserialized from config.
     #[serde(skip_deserializing)]
     pub key: RateLimitKey,
+}
+
+fn default_can_override_weight() -> bool {
+    false
 }
 
 fn default_weight() -> u64 {
@@ -238,7 +245,6 @@ pub(crate) struct BucketHandle {
     tx: mpsc::Sender<PermitReq>,
 }
 
-
 impl BucketHandle {
     pub async fn wait(&self, weight: u32) {
         let (tx, rx) = oneshot::channel();
@@ -310,6 +316,7 @@ pub(crate) struct RuleSpec {
     pub limit: u32,
     pub interval: Duration,
     pub weight: u32,
+    pub can_override_weight: bool,
 }
 
 pub(crate) struct RateLimitManager {
@@ -351,6 +358,7 @@ impl RateLimitManager {
                         limit: r.limit as u32,
                         interval: r.timeframe.duration(),
                         weight: r.weight as u32,
+                        can_override_weight: r.can_override_weight,
                     });
                 }
             }
@@ -363,6 +371,7 @@ impl RateLimitManager {
                 limit: r.limit as u32,
                 interval: r.timeframe.duration(),
                 weight: r.weight as u32,
+                can_override_weight: r.can_override_weight,
             });
         }
 
@@ -371,7 +380,11 @@ impl RateLimitManager {
         true
     }
 
-    pub fn plan(&mut self, bytes_ctx: &Bytes) -> Option<Vec<(BucketHandle, u32)>> {
+    pub fn plan(
+        &mut self,
+        bytes_ctx: &Bytes,
+        weight_override: Option<usize>,
+    ) -> Option<Vec<(BucketHandle, u32)>> {
         if !self.resolve_rules(bytes_ctx) {
             return None;
         }
@@ -385,8 +398,16 @@ impl RateLimitManager {
                 .entry(spec.key.clone())
                 .or_insert_with(|| BucketHandle::spawn_bucket_actor(spec.limit, spec.interval))
                 .clone();
+            
+            let weight = if spec.can_override_weight
+                && let Some(w) = weight_override
+            {
+                w as u32
+            } else {
+                spec.weight
+            };
 
-            plan.push((handle, spec.weight));
+            plan.push((handle, weight));
         }
         Some(plan)
     }

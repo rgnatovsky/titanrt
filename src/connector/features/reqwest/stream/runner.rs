@@ -93,13 +93,15 @@ where
 
                 let req_id = action.req_id;
                 let rl_ctx = action.rl_ctx.take();
+                let rl_weight = action.rl_weight;
                 let label = action.label.take();
                 let payload = action.payload.take();
 
                 let request = match action.to_request_builder(&client).build() {
                     Ok(request) => request,
                     Err(e) => {
-                        let _ = res_tx.try_send(ReqwestEvent::from_error(e, req_id, label, payload));
+                        let _ =
+                            res_tx.try_send(ReqwestEvent::from_error(e, req_id, label, payload));
                         continue;
                     }
                 };
@@ -116,7 +118,7 @@ where
                     if let Some(rl_manager) = rl_manager {
                         let plan = {
                             let mut mgr = rl_manager.lock().await;
-                            mgr.plan(rl_ctx.as_ref().unwrap())
+                            mgr.plan(rl_ctx.as_ref().unwrap(), rl_weight)
                         };
 
                         if let Some(plan) = plan {

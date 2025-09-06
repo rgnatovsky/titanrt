@@ -62,6 +62,7 @@ impl BaseModel for TestModel2 {
                 timeframe: Timeframe::new(1, TimeUnit::Second),
                 limit: 5,
                 weight: 1,
+                can_override_weight: false,
                 key: Default::default(),
             }],
         });
