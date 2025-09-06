@@ -65,6 +65,7 @@ pub struct ActionBuilder {
     label: Option<&'static str>,
     ip_id: Option<u16>,
     rl_ctx: Option<Bytes>,
+    payload: Option<Value>
 }
 
 impl ActionBuilder {
@@ -81,6 +82,7 @@ impl ActionBuilder {
             ip_id: None,
             rl_ctx: None,
             timeout: None,
+            payload: None,
         }
     }
 
@@ -99,7 +101,11 @@ impl ActionBuilder {
         self.timeout = Some(t);
         self
     }
-
+    /// Sets the payload of the request.
+    pub fn payload(mut self, payload: Value) -> Self {
+        self.payload = Some(payload);
+        self
+    }
     /// Adds a custom header key-value pair.
     pub fn header_kv(mut self, k: &str, v: &str) -> Self {
         use reqwest::header::{HeaderName, HeaderValue};
@@ -214,6 +220,7 @@ impl ActionBuilder {
             timeout: self.timeout,
             body: self.body,
             query: self.query,
+            payload: self.payload,
         }
     }
 }
@@ -230,6 +237,7 @@ pub struct ReqwestAction {
     pub ip_id: Option<u16>,
     pub rl_ctx: Option<Bytes>,
     pub timeout: Option<Duration>,
+    pub payload: Option<Value>
 }
 
 impl ReqwestAction {

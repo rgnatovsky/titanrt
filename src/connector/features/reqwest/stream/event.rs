@@ -2,15 +2,17 @@ use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use reqwest::header::HeaderMap;
 use reqwest::{Response, StatusCode};
+use serde_json::Value;
 use uuid::Uuid;
 
 #[derive(Debug)]
 pub struct ReqwestEvent {
-    status: StatusCode,
-    headers: HeaderMap,
-    body: Option<Bytes>,
-    req_id: Option<Uuid>,
-    label: Option<&'static str>,
+    pub status: StatusCode,
+    pub headers: HeaderMap,
+    pub body: Option<Bytes>,
+    pub req_id: Option<Uuid>,
+    pub label: Option<&'static str>,
+    pub payload: Option<Value>
 }
 
 impl ReqwestEvent {
@@ -21,6 +23,7 @@ impl ReqwestEvent {
         resp: Response,
         req_id: Option<Uuid>,
         label: Option<&'static str>,
+        payload: Option<Value>
     ) -> Self {
         let status = resp.status();
         let headers = resp.headers().clone();
@@ -36,6 +39,7 @@ impl ReqwestEvent {
                     body,
                     req_id,
                     label,
+                    payload
                 };
             }
         };
@@ -46,6 +50,7 @@ impl ReqwestEvent {
             headers,
             body,
             label,
+            payload
         }
     }
 
@@ -53,6 +58,7 @@ impl ReqwestEvent {
         error: reqwest::Error,
         req_id: Option<Uuid>,
         label: Option<&'static str>,
+        payload: Option<Value>
     ) -> Self {
         let status = StatusCode::INTERNAL_SERVER_ERROR;
         let headers = HeaderMap::new();
@@ -63,7 +69,12 @@ impl ReqwestEvent {
             headers,
             body,
             label,
+            payload
         }
+    }
+    /// Returns payload of the request
+    pub fn payload(&self) -> Option<&Value> {
+        self.payload.as_ref()
     }
     /// Returns request id
     pub fn req_id(&self) -> Option<&Uuid> {
