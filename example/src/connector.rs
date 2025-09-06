@@ -65,7 +65,7 @@ impl BaseConnector for CompositeConnector {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct CounterEvent {
     pub actions_sum: u64,
 }
@@ -168,7 +168,7 @@ where
             }
 
             let hook_args = HookArgs::new(
-                &event,
+                event.clone(),
                 &mut ctx.event_tx,
                 &mut ctx.reducer,
                 &ctx.state,

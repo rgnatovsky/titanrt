@@ -7,12 +7,12 @@ use uuid::Uuid;
 
 #[derive(Debug)]
 pub struct ReqwestEvent {
-    pub status: StatusCode,
-    pub headers: HeaderMap,
-    pub body: Option<Bytes>,
-    pub req_id: Option<Uuid>,
-    pub label: Option<&'static str>,
-    pub payload: Option<Value>
+    status: StatusCode,
+    headers: HeaderMap,
+    body: Option<Bytes>,
+    req_id: Option<Uuid>,
+    label: Option<&'static str>,
+    payload: Option<Value>,
 }
 
 impl ReqwestEvent {
@@ -23,7 +23,7 @@ impl ReqwestEvent {
         resp: Response,
         req_id: Option<Uuid>,
         label: Option<&'static str>,
-        payload: Option<Value>
+        payload: Option<Value>,
     ) -> Self {
         let status = resp.status();
         let headers = resp.headers().clone();
@@ -39,7 +39,7 @@ impl ReqwestEvent {
                     body,
                     req_id,
                     label,
-                    payload
+                    payload,
                 };
             }
         };
@@ -50,7 +50,7 @@ impl ReqwestEvent {
             headers,
             body,
             label,
-            payload
+            payload,
         }
     }
 
@@ -58,7 +58,7 @@ impl ReqwestEvent {
         error: reqwest::Error,
         req_id: Option<Uuid>,
         label: Option<&'static str>,
-        payload: Option<Value>
+        payload: Option<Value>,
     ) -> Self {
         let status = StatusCode::INTERNAL_SERVER_ERROR;
         let headers = HeaderMap::new();
@@ -69,7 +69,7 @@ impl ReqwestEvent {
             headers,
             body,
             label,
-            payload
+            payload,
         }
     }
     /// Returns payload of the request

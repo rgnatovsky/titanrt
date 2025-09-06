@@ -141,7 +141,7 @@ where
                     Ok(event) => {
                         budget -= 1;
                         hook.call(HookArgs::new(
-                            &event,
+                            event,
                             &mut ctx.event_tx,
                             &mut ctx.reducer,
                             &ctx.state,
