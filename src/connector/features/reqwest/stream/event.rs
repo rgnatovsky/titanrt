@@ -65,9 +65,13 @@ impl ReqwestEvent {
             label,
         }
     }
-
+    /// Returns request id
     pub fn req_id(&self) -> Option<&Uuid> {
         self.req_id.as_ref()
+    }
+    /// Returns label of the request
+    pub fn label(&self) -> Option<&'static str> {
+        self.label
     }
     /// Returns HTTP status code of the response.
     pub fn status(&self) -> &StatusCode {
