@@ -96,6 +96,7 @@ pub mod runtime;
 mod test;
 pub mod utils;
 
+pub mod bridges;
 #[cfg(feature = "connector")]
 pub mod connector;
 pub mod prelude;
