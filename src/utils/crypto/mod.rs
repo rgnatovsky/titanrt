@@ -30,7 +30,7 @@ impl SecretValue {
     }
 }
 
-// Кастомная десериализация
+
 impl<'de> Deserialize<'de> for SecretValue {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -39,7 +39,7 @@ impl<'de> Deserialize<'de> for SecretValue {
         #[derive(Deserialize)]
         #[serde(untagged)]
         enum SecretValueDeserialize {
-            Simple(String), // Простой случай, когда значение - это просто строка
+            Simple(String),
             Detailed {
                 value: String,
                 var_name: Option<String>,
@@ -66,13 +66,12 @@ impl<'de> Deserialize<'de> for SecretValue {
     }
 }
 
-// Кастомная сериализация
+
 impl Serialize for SecretValue {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        // Сериализуем только var_name, value затираем пустой строкой
         #[derive(Serialize)]
         struct SecretValueSerialize<'a> {
             value: &'a str,
@@ -80,8 +79,8 @@ impl Serialize for SecretValue {
         }
 
         let serialized = SecretValueSerialize {
-            value: "***", // Затираем значение, чтобы не выводить его в сериализованном виде
-            var_name: &self.var_name, // Сохраняем имя переменной окружения, если оно есть
+            value: "***",
+            var_name: &self.var_name,
         };
 
         serialized.serialize(serializer)
