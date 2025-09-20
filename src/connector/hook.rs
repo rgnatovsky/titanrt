@@ -11,7 +11,7 @@ where
     State: StateMarker,
     Desc: StreamDescriptor,
 {
-    pub raw:  Ev,
+    pub raw: Ev,
     pub event_tx: &'a mut EvTx,
     pub reducer: &'a mut R,
     pub state: &'a StateCell<State>,

@@ -1,36 +1,37 @@
 use crate::connector::BaseConnector;
-use crate::connector::features::reqwest::client::{ReqwestClient, ReqwestClientSpec};
 use crate::connector::features::shared::clients_map::{ClientConfig, ClientsMap};
+use crate::connector::features::tonic::client::{TonicChannelSpec, TonicClient};
 use crate::utils::{CancelToken, CoreStats};
-use serde::{Deserialize, Serialize};
-use std::fmt::Display;
 
-use std::sync::Arc;
+use serde::{Deserialize, Serialize};
+use std::{fmt::Display, sync::Arc};
+
+pub const DEFAULT_CONN_ID: u16 = u16::MAX;
 
 #[derive(Clone, Deserialize, Serialize)]
-pub struct ReqwestConnectorConfig {
+pub struct TonicConnectorConfig {
     pub default_max_cores: Option<usize>,
     pub specific_core_ids: Vec<usize>,
     pub use_core_stats: bool,
-    pub client: ClientConfig<ReqwestClientSpec>,
+    pub client: ClientConfig<TonicChannelSpec>,
 }
 
-pub struct ReqwestConnector {
-    config: ReqwestConnectorConfig,
-    clients_map: ClientsMap<ReqwestClient, ReqwestClientSpec>,
+pub struct TonicConnector {
+    config: TonicConnectorConfig,
+    clients_map: ClientsMap<TonicClient, TonicChannelSpec>,
     cancel_token: CancelToken,
     core_stats: Option<Arc<CoreStats>>,
 }
 
-impl ReqwestConnector {
-    pub fn clients_map(&self) -> ClientsMap<ReqwestClient, ReqwestClientSpec> {
+impl TonicConnector {
+    pub fn clients_map(&self) -> ClientsMap<TonicClient, TonicChannelSpec> {
         self.clients_map.clone()
     }
 }
 
-impl BaseConnector for ReqwestConnector {
-    type MainConfig = ReqwestConnectorConfig;
-
+impl BaseConnector for TonicConnector {
+    type MainConfig = TonicConnectorConfig;
+    ///  создаются gRPC-каналы (tonic::transport::Channel) через create_channel().
     fn init(
         config: Self::MainConfig,
         cancel_token: CancelToken,
@@ -45,6 +46,7 @@ impl BaseConnector for ReqwestConnector {
         } else {
             None
         };
+
         let clients_map = ClientsMap::new(&config.client)?;
 
         Ok(Self {
@@ -56,24 +58,21 @@ impl BaseConnector for ReqwestConnector {
     }
 
     fn name(&self) -> impl AsRef<str> + Display {
-        "reqwest"
+        "tonic"
     }
-
     fn config(&self) -> &Self::MainConfig {
         &self.config
     }
-
     fn cancel_token(&self) -> &CancelToken {
         &self.cancel_token
     }
-
     fn cores_stats(&self) -> Option<Arc<CoreStats>> {
         self.core_stats.clone()
     }
 }
 
-impl Display for ReqwestConnector {
+impl Display for TonicConnector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "BinanceConnector")
+        write!(f, "TonicConnector")
     }
 }

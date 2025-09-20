@@ -41,7 +41,10 @@ tokio = { version = "1.47.1", features = [
 serde_urlencoded = { version = "0.7.1", optional = true }
 futures = "0.3.31"
 async-nats = { version = "0.42.0", optional = true }
-tonic = { version = "0.14.2", features = ["transport", "tls-native-roots"] }
+tonic = { version = "0.14.2", features = [
+    "transport",
+    "tls-native-roots",
+], optional = true }
 rustls = { version = "0.23.31", default-features = false, features = ["ring"] }
 
 [dev-dependencies]
@@ -52,7 +55,8 @@ name = "runtime_hot_loop"
 harness = false
 
 [features]
-default = ["connector", "reqwest_conn"]
+default = ["connector", "reqwest_conn", "tonic_conn"]
 connector = []
 reqwest_conn = ["tokio", "reqwest", "serde_urlencoded"]
+tonic_conn = ["tonic", "tokio"]
 nats_bridge = ["tokio", "async-nats"]

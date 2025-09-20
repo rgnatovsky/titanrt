@@ -1,11 +1,9 @@
-use crate::connector::features::reqwest::rate_limiter::RateLimitContext;
 use bytes::Bytes;
 use reqwest::Client;
-pub use reqwest::{header::HeaderMap, Method, Url};
+pub use reqwest::{Method, Url, header::HeaderMap};
 use serde::Serialize;
 use serde_json::Value;
 use std::time::Duration;
-use uuid::Uuid;
 
 /// Represents the body of an HTTP request.
 #[derive(Debug, Clone)]
@@ -52,24 +50,63 @@ impl ActionBody {
     }
 }
 
-/// Builder for constructing Action objects with a fluent API.
-#[derive(Debug)]
-pub struct ActionBuilder {
-    method: Method,
-    url: Url,
-    body: ActionBody,
-    query: Vec<(String, String)>,
-    headers: HeaderMap,
-    timeout: Option<Duration>,
-    req_id: Option<Uuid>,
-    label: Option<&'static str>,
-    ip_id: Option<u16>,
-    rl_ctx: Option<Bytes>,
-    rl_weight: Option<usize>,
-    payload: Option<Value>
+#[derive(Debug, Clone)]
+pub struct ReqwestAction {
+    pub method: Method,
+    pub url: Url,
+    pub body: ActionBody,
+    pub query: Vec<(String, String)>,
+    pub headers: HeaderMap,
 }
 
-impl ActionBuilder {
+impl ReqwestAction {
+    pub(crate) fn to_request_builder(
+        self,
+        client: &Client,
+        timeout: Option<Duration>,
+    ) -> reqwest::RequestBuilder {
+        let mut rb = client.request(self.method, self.url);
+        if !self.headers.is_empty() {
+            rb = rb.headers(self.headers);
+        }
+        if !self.query.is_empty() {
+            rb = rb.query(&self.query);
+        }
+
+        if let Some(timeout) = timeout {
+            rb = rb.timeout(timeout);
+        }
+
+        self.body.apply_to(rb)
+    }
+
+    pub fn builder(method: Method, url: Url) -> ReqwestActionBuilder {
+        ReqwestActionBuilder::new(method, url)
+    }
+    pub fn get(url: Url) -> ReqwestActionBuilder {
+        Self::builder(Method::GET, url)
+    }
+    pub fn post(url: Url) -> ReqwestActionBuilder {
+        Self::builder(Method::POST, url)
+    }
+    pub fn put(url: Url) -> ReqwestActionBuilder {
+        Self::builder(Method::PUT, url)
+    }
+    pub fn delete(url: Url) -> ReqwestActionBuilder {
+        Self::builder(Method::DELETE, url)
+    }
+}
+
+#[derive(Debug)]
+pub struct ReqwestActionBuilder {
+    pub method: Method,
+    pub url: Url,
+    pub body: ActionBody,
+    pub query: Vec<(String, String)>,
+    pub headers: HeaderMap,
+}
+
+impl ReqwestActionBuilder {
     /// Creates a new builder with the given HTTP method and URL.
     pub fn new(method: Method, url: Url) -> Self {
         Self {
@@ -78,36 +115,9 @@ impl ActionBuilder {
             body: ActionBody::Empty,
             query: Vec::new(),
             headers: HeaderMap::new(),
-            req_id: None,
-            label: None,
-            ip_id: None,
-            rl_ctx: None,
-            rl_weight: None,
-            timeout: None,
-            payload: None,
         }
     }
 
-    /// Sets the request identifier (trace ID).
-    pub fn req_id(mut self, id: Uuid) -> Self {
-        self.req_id = Some(id);
-        self
-    }
-    /// Sets the local IP identifier used for client selection.
-    pub fn ip_id(mut self, id: u16) -> Self {
-        self.ip_id = Some(id);
-        self
-    }
-    /// Sets a request timeout.
-    pub fn timeout(mut self, t: Duration) -> Self {
-        self.timeout = Some(t);
-        self
-    }
-    /// Sets the payload of the request.
-    pub fn payload(mut self, payload: Value) -> Self {
-        self.payload = Some(payload);
-        self
-    }
     /// Adds a custom header key-value pair.
     pub fn header_kv(mut self, k: &str, v: &str) -> Self {
         use reqwest::header::{HeaderName, HeaderValue};
@@ -148,12 +158,6 @@ impl ActionBuilder {
                 }
             }
         }
-        self
-    }
-
-    /// Sets a label for the request.
-    pub fn label(mut self, label: &'static str) -> Self {
-        self.label = Some(label);
         self
     }
 
@@ -199,85 +203,13 @@ impl ActionBuilder {
         self
     }
 
-    pub fn rl_ctx(mut self, ctx: RateLimitContext) -> Self {
-        self.rl_ctx = Some(ctx.to_bytes());
-        self
-    }
-
-    pub fn rl_ctx_bytes(mut self, ctx: Bytes) -> Self {
-        self.rl_ctx = Some(ctx);
-        self
-    }
-    pub fn rl_weight(mut self, weight: usize) -> Self {
-        self.rl_weight = Some(weight);
-        self
-    }
-
-    /// Builds and returns the final Action.
     pub fn build(self) -> ReqwestAction {
         ReqwestAction {
-            req_id: self.req_id,
-            ip_id: self.ip_id,
             method: self.method,
-            rl_ctx: self.rl_ctx,
-            rl_weight: self.rl_weight,
-            label: self.label,
             url: self.url,
             headers: self.headers,
-            timeout: self.timeout,
             body: self.body,
             query: self.query,
-            payload: self.payload,
         }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ReqwestAction {
-    pub method: Method,
-    pub url: Url,
-    pub body: ActionBody,
-    pub query: Vec<(String, String)>,
-    pub headers: HeaderMap,
-    pub req_id: Option<Uuid>,
-    pub label: Option<&'static str>,
-    pub ip_id: Option<u16>,
-    pub rl_ctx: Option<Bytes>,
-    pub rl_weight: Option<usize>,
-    pub timeout: Option<Duration>,
-    pub payload: Option<Value>
-}
-
-impl ReqwestAction {
-    pub(crate) fn to_request_builder(self, client: &Client) -> reqwest::RequestBuilder {
-        let mut rb = client.request(self.method, self.url);
-        if !self.headers.is_empty() {
-            rb = rb.headers(self.headers);
-        }
-        if !self.query.is_empty() {
-            rb = rb.query(&self.query);
-        }
-
-        if let Some(timeout) = self.timeout {
-            rb = rb.timeout(timeout);
-        }
-
-        self.body.apply_to(rb)
-    }
-
-    pub fn builder(method: Method, url: Url) -> ActionBuilder {
-        ActionBuilder::new(method, url)
-    }
-    pub fn get(url: Url) -> ActionBuilder {
-        Self::builder(Method::GET, url)
-    }
-    pub fn post(url: Url) -> ActionBuilder {
-        Self::builder(Method::POST, url)
-    }
-    pub fn put(url: Url) -> ActionBuilder {
-        Self::builder(Method::PUT, url)
-    }
-    pub fn delete(url: Url) -> ActionBuilder {
-        Self::builder(Method::DELETE, url)
     }
 }

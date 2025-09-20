@@ -46,38 +46,38 @@ impl Codec for RawCodec {
     fn decoder(&mut self) -> Self::Decoder { RawDecoder }
 }
 
-/// Encode: Result<Bytes, Status> (важно: можно отдать ошибку прямо из стрима).
-/// Decode: Bytes
-/// используется для ClientStreaming и BidiStreaming.
-#[derive(Clone, Default)]
-pub struct RawStreamingCodec;
-#[derive(Clone, Default)]
-pub struct RawStreamingEncoder;
-#[derive(Clone, Default)]
-pub struct RawStreamingDecoder;
+// /// Encode: Result<Bytes, Status> (важно: можно отдать ошибку прямо из стрима).
+// /// Decode: Bytes
+// /// используется для ClientStreaming и BidiStreaming.
+// #[derive(Clone, Default)]
+// pub struct RawStreamingCodec;
+// #[derive(Clone, Default)]
+// pub struct RawStreamingEncoder;
+// #[derive(Clone, Default)]
+// pub struct RawStreamingDecoder;
 
-impl Encoder for RawStreamingEncoder {
-    type Item = Result<Bytes, tonic::Status>;        // <-- ВАЖНО
-    type Error = tonic::Status;
-    fn encode(&mut self, item: Self::Item, dst: &mut EncodeBuf<'_>) -> Result<(), Self::Error> {
-        let bytes = item?;                           // если Err(Status) - пробрасываем
-        dst.put_slice(&bytes);
-        Ok(())
-    }
-}
-impl Decoder for RawStreamingDecoder {
-    type Item = Bytes;
-    type Error = tonic::Status;
-    fn decode(&mut self, src: &mut DecodeBuf<'_>) -> Result<Option<Self::Item>, Self::Error> {
-        let n = src.remaining();
-        Ok(Some(src.copy_to_bytes(n)))
-    }
-}
-impl Codec for RawStreamingCodec {
-    type Encode = Result<Bytes, tonic::Status>;      // <-- ВАЖНО
-    type Decode = Bytes;
-    type Encoder = RawStreamingEncoder;
-    type Decoder = RawStreamingDecoder;
-    fn encoder(&mut self) -> Self::Encoder { RawStreamingEncoder }
-    fn decoder(&mut self) -> Self::Decoder { RawStreamingDecoder }
-}
+// impl Encoder for RawStreamingEncoder {
+//     type Item = Result<Bytes, tonic::Status>;        // <-- ВАЖНО
+//     type Error = tonic::Status;
+//     fn encode(&mut self, item: Self::Item, dst: &mut EncodeBuf<'_>) -> Result<(), Self::Error> {
+//         let bytes = item?;                           // если Err(Status) - пробрасываем
+//         dst.put_slice(&bytes);
+//         Ok(())
+//     }
+// }
+// impl Decoder for RawStreamingDecoder {
+//     type Item = Bytes;
+//     type Error = tonic::Status;
+//     fn decode(&mut self, src: &mut DecodeBuf<'_>) -> Result<Option<Self::Item>, Self::Error> {
+//         let n = src.remaining();
+//         Ok(Some(src.copy_to_bytes(n)))
+//     }
+// }
+// impl Codec for RawStreamingCodec {
+//     type Encode = Result<Bytes, tonic::Status>;      // <-- ВАЖНО
+//     type Decode = Bytes;
+//     type Encoder = RawStreamingEncoder;
+//     type Decoder = RawStreamingDecoder;
+//     fn encoder(&mut self) -> Self::Encoder { RawStreamingEncoder }
+//     fn decoder(&mut self) -> Self::Decoder { RawStreamingDecoder }
+// }

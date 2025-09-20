@@ -1,4 +1,4 @@
-use crate::connector::features::reqwest::rate_limiter::RateLimitConfig;
+use crate::connector::features::shared::rate_limiter::RateLimitConfig;
 use crate::connector::{Kind, StreamDescriptor, Venue};
 use crate::utils::CorePickPolicy;
 use serde::Deserialize;

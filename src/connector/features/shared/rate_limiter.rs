@@ -12,7 +12,7 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::task;
-use tokio::time::{sleep_until, Instant as TokioInstant};
+use tokio::time::{Instant as TokioInstant, sleep_until};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 /// Top-level rate limit configuration for a venue (exchange).
@@ -398,7 +398,7 @@ impl RateLimitManager {
                 .entry(spec.key.clone())
                 .or_insert_with(|| BucketHandle::spawn_bucket_actor(spec.limit, spec.interval))
                 .clone();
-            
+
             let weight = if spec.can_override_weight
                 && let Some(w) = weight_override
             {

@@ -1,32 +1,25 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use bytes::Bytes;
 use reqwest::header::HeaderMap;
 use reqwest::{Response, StatusCode};
-use serde_json::Value;
-use uuid::Uuid;
+
+use crate::connector::features::shared::events::StreamEventInner;
 
 #[derive(Debug)]
 pub struct ReqwestEvent {
     status: StatusCode,
+    err_msg: Option<String>,
     headers: HeaderMap,
     body: Option<Bytes>,
-    req_id: Option<Uuid>,
-    label: Option<&'static str>,
-    payload: Option<Value>,
 }
 
 impl ReqwestEvent {
     /// Creates TcpResponse from hyper Response.
     /// Consumes the hyper response and collects its body.
 
-    pub async fn from_raw(
-        resp: Response,
-        req_id: Option<Uuid>,
-        label: Option<&'static str>,
-        payload: Option<Value>,
-    ) -> Self {
-        let status = resp.status();
+    pub async fn from_raw(resp: Response) -> Self {
         let headers = resp.headers().clone();
+        let status = resp.status();
 
         let body = match resp.bytes().await {
             Ok(bytes) if !bytes.is_empty() => Some(bytes),
@@ -34,57 +27,45 @@ impl ReqwestEvent {
             Err(e) => {
                 let body = Some(Bytes::from(e.to_string()));
                 return Self {
-                    status: StatusCode::INTERNAL_SERVER_ERROR,
+                    status: StatusCode::BAD_GATEWAY,
+                    err_msg: Some(e.to_string()),
                     headers,
                     body,
-                    req_id,
-                    label,
-                    payload,
                 };
             }
         };
 
+        let err_msg = if status.is_client_error() || status.is_server_error() {
+            let msg = format!(
+                "Request failed with status code: {} ({})",
+                status,
+                status.canonical_reason().unwrap_or("Unknown reason"),
+            );
+            Some(msg)
+        } else {
+            None
+        };
+
         Self {
-            req_id,
             status,
+            err_msg,
             headers,
             body,
-            label,
-            payload,
         }
     }
 
-    pub fn from_error(
-        error: reqwest::Error,
-        req_id: Option<Uuid>,
-        label: Option<&'static str>,
-        payload: Option<Value>,
-    ) -> Self {
-        let status = StatusCode::INTERNAL_SERVER_ERROR;
+    pub fn from_error(error: reqwest::Error) -> Self {
+        let status = StatusCode::BAD_GATEWAY;
         let headers = HeaderMap::new();
         let body = Some(Bytes::from(error.to_string()));
         Self {
-            req_id,
             status,
             headers,
+            err_msg: Some(error.to_string()),
             body,
-            label,
-            payload,
         }
     }
-    /// Returns payload of the request
-    pub fn payload(&self) -> Option<&Value> {
-        self.payload.as_ref()
-    }
-    /// Returns request id
-    pub fn req_id(&self) -> Option<&Uuid> {
-        self.req_id.as_ref()
-    }
-    /// Returns label of the request
-    pub fn label(&self) -> Option<&'static str> {
-        self.label
-    }
-    /// Returns HTTP status code of the response.
+
     pub fn status(&self) -> &StatusCode {
         &self.status
     }
@@ -172,5 +153,23 @@ impl ReqwestEvent {
         }
 
         None
+    }
+}
+
+impl StreamEventInner for ReqwestEvent {
+    type Body = Bytes;
+    type Err = String;
+    type Code = StatusCode;
+
+    fn status(&self) -> Option<&Self::Code> {
+        Some(&self.status)
+    }
+
+    fn error(&self) -> Option<&Self::Err> {
+        self.err_msg.as_ref()
+    }
+
+    fn body(&self) -> Option<&Self::Body> {
+        self.body.as_ref()
     }
 }
