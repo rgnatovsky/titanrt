@@ -3,8 +3,8 @@ use crate::connector::{RuntimeCtx, Stream, StreamDescriptor, StreamRunner};
 use crate::io::base::{BaseTx, TxPairExt};
 use crate::utils::*;
 use std::{sync::Arc, thread};
-use uuid::fmt::Simple;
 use uuid::Uuid;
+use uuid::fmt::Simple;
 
 /// Blanket helper for spawning typed streams from a connector.
 ///

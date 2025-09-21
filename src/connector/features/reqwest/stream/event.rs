@@ -165,11 +165,19 @@ impl StreamEventInner for ReqwestEvent {
         Some(&self.status)
     }
 
+    fn is_ok(&self) -> bool {
+        self.status.is_success()
+    }
+
     fn error(&self) -> Option<&Self::Err> {
         self.err_msg.as_ref()
     }
 
     fn body(&self) -> Option<&Self::Body> {
         self.body.as_ref()
+    }
+
+    fn into_body(self) -> Option<Self::Body> {
+        self.body
     }
 }

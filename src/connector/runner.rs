@@ -1,6 +1,6 @@
+use crate::connector::StreamDescriptor;
 use crate::connector::errors::StreamResult;
 use crate::connector::hook::IntoHook;
-use crate::connector::StreamDescriptor;
 use crate::io::base::{BaseTx, TxPairExt};
 use crate::utils::*;
 use std::sync::Arc;

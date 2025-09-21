@@ -6,7 +6,7 @@ use serde::Deserialize;
 /// Конфиг потока: лимиты, задержки, политика выбора core, настройки rate-limit.
 /// Есть удобные фабрики: low_latency(), high_throughput().
 #[derive(Debug, Clone, Deserialize)]
-pub struct TonicUnaryStreamDescriptor {
+pub struct TonicUnaryDescriptor {
     /// Maximum number of hook calls at once.
     pub max_hook_calls_at_once: usize,
     /// Delay between async tasks.
@@ -25,7 +25,7 @@ pub struct TonicUnaryStreamDescriptor {
     pub max_encoding_message_size: Option<usize>,
 }
 
-impl TonicUnaryStreamDescriptor {
+impl TonicUnaryDescriptor {
     pub fn new(
         max_hook_calls_at_once: Option<usize>,
         wait_async_tasks_us: Option<u64>,
@@ -69,7 +69,7 @@ impl TonicUnaryStreamDescriptor {
     }
 }
 
-impl Default for TonicUnaryStreamDescriptor {
+impl Default for TonicUnaryDescriptor {
     fn default() -> Self {
         Self {
             max_hook_calls_at_once: 10,
@@ -84,7 +84,7 @@ impl Default for TonicUnaryStreamDescriptor {
     }
 }
 
-impl StreamDescriptor for TonicUnaryStreamDescriptor {
+impl StreamDescriptor for TonicUnaryDescriptor {
     fn venue(&self) -> impl Venue {
         "any"
     }

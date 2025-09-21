@@ -1,6 +1,7 @@
 // core_stats.rs
 use ahash::AHashMap;
 use anyhow::Context;
+use core_affinity::{CoreId, get_core_ids, set_for_current};
 use crossbeam::utils::CachePadded;
 use serde::Deserialize;
 use std::ops::Deref;
@@ -9,7 +10,6 @@ use std::{
     sync::Arc,
     sync::atomic::{AtomicU32, AtomicU64, Ordering::*},
 };
-use core_affinity::{get_core_ids, set_for_current, CoreId};
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -239,8 +239,8 @@ impl CoreStats {
 
 pub fn try_pin_core(core_id: usize) -> anyhow::Result<usize> {
     if let Some(core_ids) = get_core_ids()
-       && core_ids.len() > core_id
-       && set_for_current(CoreId { id: core_id })
+        && core_ids.len() > core_id
+        && set_for_current(CoreId { id: core_id })
     {
         return Ok(core_id);
     }

@@ -73,7 +73,7 @@ impl HealthFlag {
 impl fmt::Debug for HealthFlag {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("HealthFlag")
-         .field("value", &self.get())
-         .finish()
+            .field("value", &self.get())
+            .finish()
     }
 }

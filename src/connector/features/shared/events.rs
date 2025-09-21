@@ -11,8 +11,10 @@ pub trait StreamEventInner {
     type Code;
 
     fn status(&self) -> Option<&Self::Code>;
+    fn is_ok(&self) -> bool;
     fn error(&self) -> Option<&Self::Err>;
     fn body(&self) -> Option<&Self::Body>;
+    fn into_body(self) -> Option<Self::Body>;
 }
 
 #[derive(Debug)]
@@ -26,10 +28,18 @@ impl StreamEventInner for NoInner {
     fn status(&self) -> Option<&Self::Code> {
         None
     }
+
+    fn is_ok(&self) -> bool {
+        true
+    }
     fn error(&self) -> Option<&Self::Err> {
         None
     }
     fn body(&self) -> Option<&Self::Body> {
+        None
+    }
+
+    fn into_body(self) -> Option<Self::Body> {
         None
     }
 }
@@ -236,11 +246,17 @@ mod tests {
         fn status(&self) -> Option<&Self::Code> {
             self.code.as_ref()
         }
+        fn is_ok(&self) -> bool {
+            self.code.is_none()
+        }
         fn error(&self) -> Option<&Self::Err> {
             self.err.as_ref()
         }
         fn body(&self) -> Option<&Self::Body> {
             self.body.as_ref()
+        }
+        fn into_body(self) -> Option<Self::Body> {
+            self.body
         }
     }
 

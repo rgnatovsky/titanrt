@@ -7,7 +7,7 @@ use crate::connector::features::tonic::client::{TonicChannelSpec, TonicClient};
 use crate::connector::features::tonic::connector::TonicConnector;
 use crate::connector::features::tonic::unary::UnaryEvent;
 use crate::connector::features::tonic::unary::actions::UnaryActionInner;
-use crate::connector::features::tonic::unary::descriptor::TonicUnaryStreamDescriptor;
+use crate::connector::features::tonic::unary::descriptor::TonicUnaryDescriptor;
 use crate::connector::{Hook, HookArgs, IntoHook, RuntimeCtx, StreamRunner, StreamSpawner};
 use crate::io::ringbuffer::RingSender;
 use crate::prelude::{BaseRx, TxPairExt};
@@ -23,7 +23,7 @@ use tokio::time::sleep;
 use tonic::Status;
 use tonic::client::Grpc;
 
-impl<E, R, S> StreamSpawner<TonicUnaryStreamDescriptor, E, R, S> for TonicConnector
+impl<E, R, S> StreamSpawner<TonicUnaryDescriptor, E, R, S> for TonicConnector
 where
     E: TxPairExt,
     S: StateMarker,
@@ -31,7 +31,7 @@ where
 {
 }
 
-impl<E, R, S> StreamRunner<TonicUnaryStreamDescriptor, E, R, S> for TonicConnector
+impl<E, R, S> StreamRunner<TonicUnaryDescriptor, E, R, S> for TonicConnector
 where
     E: TxPairExt,
     S: StateMarker,
@@ -42,14 +42,14 @@ where
     type RawEvent = StreamEvent<UnaryEvent>;
     type HookResult = ();
 
-    fn build_config(&mut self, _desc: &TonicUnaryStreamDescriptor) -> anyhow::Result<Self::Config> {
+    fn build_config(&mut self, _desc: &TonicUnaryDescriptor) -> anyhow::Result<Self::Config> {
         Ok(self.clients_map().clone())
     }
 
     fn run<H>(
         mut ctx: RuntimeCtx<
             ClientsMap<TonicClient, TonicChannelSpec>,
-            TonicUnaryStreamDescriptor,
+            TonicUnaryDescriptor,
             RingSender<StreamAction<UnaryActionInner>>,
             E,
             R,
@@ -58,7 +58,7 @@ where
         hook: H,
     ) -> StreamResult<()>
     where
-        H: IntoHook<StreamEvent<UnaryEvent>, E, R, S, TonicUnaryStreamDescriptor, ()>,
+        H: IntoHook<StreamEvent<UnaryEvent>, E, R, S, TonicUnaryDescriptor, ()>,
         E: TxPairExt,
         S: StateMarker,
     {

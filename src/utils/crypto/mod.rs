@@ -30,7 +30,6 @@ impl SecretValue {
     }
 }
 
-
 impl<'de> Deserialize<'de> for SecretValue {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -65,7 +64,6 @@ impl<'de> Deserialize<'de> for SecretValue {
         }
     }
 }
-
 
 impl Serialize for SecretValue {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

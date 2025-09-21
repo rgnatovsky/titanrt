@@ -3,37 +3,67 @@ use tonic::{Code, Status, metadata::MetadataMap};
 
 use crate::connector::features::shared::events::StreamEventInner;
 
-/// Внутреннее представление gRPC-ивента, теперь совместимо с StreamEventInner.
 #[derive(Debug, Clone)]
-pub struct UnaryEvent {
+pub struct StreamingEvent {
     code: Option<Code>,
     err_msg: Option<String>,
-    pub metadata: MetadataMap,
+    metadata: MetadataMap,
     body: Option<Bytes>,
+    is_stream_item: bool,
 }
 
-impl UnaryEvent {
-    pub(crate) fn from_ok_unary(resp: tonic::Response<Bytes>) -> Self {
+impl StreamingEvent {
+    pub fn from_ok_unary(resp: tonic::Response<Bytes>) -> Self {
         let (metadata, body, _trailing) = resp.into_parts();
         Self {
             code: None,
             err_msg: None,
             metadata,
             body: Some(body),
+            is_stream_item: false,
         }
     }
 
-    pub(crate) fn from_status(st: Status) -> Self {
+    pub fn from_ok_stream_item(body: Bytes) -> Self {
+        Self {
+            code: None,
+            err_msg: None,
+            metadata: MetadataMap::new(),
+            body: Some(body),
+            is_stream_item: true,
+        }
+    }
+
+    pub fn from_ok_stream_close(metadata: MetadataMap) -> Self {
+        Self {
+            code: None,
+            err_msg: None,
+            metadata,
+            body: None,
+            is_stream_item: false,
+        }
+    }
+
+    pub fn from_status(st: Status) -> Self {
         Self {
             code: Some(st.code()),
             err_msg: Some(st.message().to_string()),
-            metadata: MetadataMap::new(),
+            metadata: st.metadata().clone(),
             body: None,
+            is_stream_item: false,
         }
+    }
+
+    pub fn metadata(&self) -> &MetadataMap {
+        &self.metadata
+    }
+
+    pub fn is_stream_item(&self) -> bool {
+        self.is_stream_item
     }
 }
 
-impl StreamEventInner for UnaryEvent {
+impl StreamEventInner for StreamingEvent {
     type Body = Bytes;
     type Err = String;
     type Code = Code;

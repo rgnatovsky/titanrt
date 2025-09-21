@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
@@ -66,7 +66,7 @@ impl BaseModel for HotModel {
     }
 
     fn hot_reload(&mut self, _config: &Self::Config) -> anyhow::Result<()> {
-       Ok(())
+        Ok(())
     }
 }
 

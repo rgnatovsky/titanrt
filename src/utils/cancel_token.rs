@@ -1,7 +1,7 @@
 use std::fmt;
 use std::fmt::Debug;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 /// Internal cancellation state, shared via [`Arc`].
@@ -101,7 +101,6 @@ impl CancelToken {
     /// If the token is cancelled, return false, otherwise return true.
     #[inline]
     pub fn sleep_cancellable(&self, total: Duration) -> bool {
-
         let mut slept = Duration::ZERO;
         let tick = Duration::from_millis(50);
         while slept < total {

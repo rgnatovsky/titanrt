@@ -4,8 +4,8 @@ use crate::io::base::{BaseRx, BaseTx, RxMarker, TxMarker};
 use crate::utils::*;
 use std::fmt::{Debug, Display};
 use std::{fmt, sync::Arc, thread::JoinHandle, time::Duration};
-use uuid::fmt::Simple;
 use uuid::Uuid;
+use uuid::fmt::Simple;
 
 /// Unique identifier for a spawned stream.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]

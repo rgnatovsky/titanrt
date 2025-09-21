@@ -5,13 +5,13 @@ use crate::io::base::BaseTx;
 use crate::io::ringbuffer::{RingBuffer, RingSender};
 use crate::model::{BaseModel, ExecutionResult, Output, StopKind};
 use crate::utils::CancelToken;
-use crate::utils::{try_pin_core, HealthFlag};
-use anyhow::{anyhow, Result};
+use crate::utils::{HealthFlag, try_pin_core};
+use anyhow::{Result, anyhow};
 use signal_hook::consts::TERM_SIGNALS;
 use signal_hook::flag;
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 use std::{hint::spin_loop, thread, time::Duration};
 
