@@ -8,7 +8,7 @@ use std::{fmt::Display, sync::Arc};
 
 pub const DEFAULT_CONN_ID: u16 = u16::MAX;
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TonicConnectorConfig {
     pub default_max_cores: Option<usize>,
     pub specific_core_ids: Vec<usize>,

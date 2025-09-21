@@ -7,7 +7,7 @@ use std::fmt::Display;
 
 use std::sync::Arc;
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ReqwestConnectorConfig {
     pub default_max_cores: Option<usize>,
     pub specific_core_ids: Vec<usize>,
