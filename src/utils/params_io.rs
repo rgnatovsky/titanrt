@@ -66,3 +66,46 @@ where
 
     Ok(des)
 }
+
+pub fn load_cfg_from_dir<T, D, F>(
+    dir: D,
+    files: impl IntoIterator<Item = F>,
+    env_prefix: Option<&str>,
+) -> anyhow::Result<T>
+where
+    T: DeserializeOwned,
+    D: AsRef<Path>,
+    F: AsRef<Path>,
+{
+    let dir_ref = dir.as_ref();
+    let mut builder = Config::builder();
+
+    for fname in files {
+        let path = dir_ref.join(fname.as_ref());
+        if path.exists() {
+            builder = builder.add_source(File::from(path));
+        } else {
+            println!(
+                "config loading: file {} does not exist (dir: {}) — skipping",
+                path.display(),
+                dir_ref.display()
+            );
+        }
+    }
+
+    // Добавляем env в конец — они имеют наивысший приоритет.
+    builder = match env_prefix {
+        Some(prefix) => builder.add_source(Environment::with_prefix(prefix).separator("__")),
+        None => builder.add_source(Environment::default().separator("__")),
+    };
+
+    let cfg = builder
+        .build()
+        .with_context(|| format!("failed to build configuration from dir {:?}", dir_ref))?;
+
+    let des: T = cfg
+        .try_deserialize()
+        .with_context(|| "failed to deserialize merged configuration")?;
+
+    Ok(des)
+}
