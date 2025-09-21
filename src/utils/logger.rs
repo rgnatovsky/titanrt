@@ -31,6 +31,48 @@ impl LoggerConfig {
             max_files: 2,
         }
     }
+
+    pub fn init_logging(
+        &self,
+    ) -> anyhow::Result<Option<tracing_appender::non_blocking::WorkerGuard>> {
+        let level = Level::from_str(&self.level).unwrap_or(Level::INFO);
+
+        if let Some(dir_str) = self.file_dir.as_deref() {
+            let prefix = self.file_prefix.as_deref().unwrap_or("");
+
+            let rotation = match self.rolling.as_deref() {
+                Some("hourly") => Rotation::HOURLY,
+                Some("minutely") => Rotation::MINUTELY,
+                _ => Rotation::DAILY,
+            };
+
+            let appender: RollingFileAppender = RollingFileAppender::builder()
+                .rotation(rotation)
+                .max_log_files(self.max_files)
+                .filename_prefix(prefix)
+                .build(dir_str)
+                .with_context(|| format!("failed to create rolling appender in {}", dir_str))?;
+
+            let (nb, guard) = tracing_appender::non_blocking(appender);
+
+            let _ = tracing_subscriber::fmt()
+                .with_max_level(level)
+                .with_writer(nb)
+                .try_init();
+
+            tracing::info!(
+                "logging to dir: {}, prefix: {}, rotation: {:?}",
+                dir_str,
+                prefix,
+                self.rolling
+            );
+            Ok(Some(guard))
+        } else {
+            let _ = tracing_subscriber::fmt().with_max_level(level).try_init();
+            tracing::info!("logging to stdout (no file_dir)");
+            Ok(None)
+        }
+    }
 }
 
 impl Default for LoggerConfig {
@@ -42,47 +84,5 @@ impl Default for LoggerConfig {
             rolling: Some("daily".to_string()),
             max_files: 2,
         }
-    }
-}
-
-pub fn init_logging(
-    cfg: &LoggerConfig,
-) -> anyhow::Result<Option<tracing_appender::non_blocking::WorkerGuard>> {
-    let level = Level::from_str(&cfg.level).unwrap_or(Level::INFO);
-
-    if let Some(dir_str) = cfg.file_dir.as_deref() {
-        let prefix = cfg.file_prefix.as_deref().unwrap_or("");
-
-        let rotation = match cfg.rolling.as_deref() {
-            Some("hourly") => Rotation::HOURLY,
-            Some("minutely") => Rotation::MINUTELY,
-            _ => Rotation::DAILY,
-        };
-
-        let appender: RollingFileAppender = RollingFileAppender::builder()
-            .rotation(rotation)
-            .max_log_files(cfg.max_files)
-            .filename_prefix(prefix)
-            .build(dir_str)
-            .with_context(|| format!("failed to create rolling appender in {}", dir_str))?;
-
-        let (nb, guard) = tracing_appender::non_blocking(appender);
-
-        let _ = tracing_subscriber::fmt()
-            .with_max_level(level)
-            .with_writer(nb)
-            .try_init();
-
-        tracing::info!(
-            "logging to dir: {}, prefix: {}, rotation: {:?}",
-            dir_str,
-            prefix,
-            cfg.rolling
-        );
-        Ok(Some(guard))
-    } else {
-        let _ = tracing_subscriber::fmt().with_max_level(level).try_init();
-        tracing::info!("logging to stdout (no file_dir)");
-        Ok(None)
     }
 }
