@@ -6,7 +6,7 @@ use crate::connector::features::shared::rate_limiter::RateLimitManager;
 use crate::connector::features::tonic::client::{TonicChannelSpec, TonicClient};
 use crate::connector::features::tonic::connector::TonicConnector;
 use crate::connector::features::tonic::unary::UnaryEvent;
-use crate::connector::features::tonic::unary::actions::UnaryActionInner;
+use crate::connector::features::tonic::unary::actions::UnaryAction;
 use crate::connector::features::tonic::unary::descriptor::TonicUnaryDescriptor;
 use crate::connector::{Hook, HookArgs, IntoHook, RuntimeCtx, StreamRunner, StreamSpawner};
 use crate::io::ringbuffer::RingSender;
@@ -38,7 +38,7 @@ where
     R: Reducer,
 {
     type Config = ClientsMap<TonicClient, TonicChannelSpec>;
-    type ActionTx = RingSender<StreamAction<UnaryActionInner>>;
+    type ActionTx = RingSender<StreamAction<UnaryAction>>;
     type RawEvent = StreamEvent<UnaryEvent>;
     type HookResult = ();
 
@@ -50,7 +50,7 @@ where
         mut ctx: RuntimeCtx<
             ClientsMap<TonicClient, TonicChannelSpec>,
             TonicUnaryDescriptor,
-            RingSender<StreamAction<UnaryActionInner>>,
+            RingSender<StreamAction<UnaryAction>>,
             E,
             R,
             S,

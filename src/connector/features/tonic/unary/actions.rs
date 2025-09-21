@@ -1,4 +1,5 @@
-use crate::connector::features::tonic::unary::{RawCodec, UnaryEvent};
+use crate::connector::features::tonic::codec::RawCodec;
+use crate::connector::features::tonic::unary::UnaryEvent;
 use bytes::Bytes;
 use std::time::Duration;
 use tokio::time::{self};
@@ -18,12 +19,12 @@ pub struct UnaryMessage {
 }
 
 #[derive(Debug, Clone)]
-pub struct UnaryActionInner {
+pub struct UnaryAction {
     pub msg: UnaryMessage, // какой тип вызова
     pub meta: MetadataMap, // заголовки gRPC
 }
 
-impl UnaryActionInner {
+impl UnaryAction {
     pub(crate) async fn execute(
         self,
         grpc: &mut Grpc<Channel>,
@@ -85,8 +86,8 @@ impl UnaryActionBuilder {
         self.header_kv(name, value)
     }
 
-    pub fn build(self) -> UnaryActionInner {
-        UnaryActionInner {
+    pub fn build(self) -> UnaryAction {
+        UnaryAction {
             msg: self.grpc,
             meta: self.metadata,
         }

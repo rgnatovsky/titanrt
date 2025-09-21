@@ -2,7 +2,7 @@ use crate::connector::features::shared::events::StreamEvent;
 use crate::connector::features::shared::rate_limiter::RateLimitManager;
 use crate::connector::features::tonic::streaming::StreamingMode;
 use crate::connector::features::tonic::streaming::actions::ConnectConfig;
-use crate::connector::features::tonic::streaming::codec::RawCodec;
+use crate::connector::features::tonic::codec::RawCodec;
 use crate::connector::features::tonic::streaming::event::StreamingEvent;
 use crate::connector::features::tonic::streaming::utils::{
     ActiveStream, MpscBytesStream, StreamContext, StreamLifecycle, emit_event,
