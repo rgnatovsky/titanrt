@@ -1,4 +1,5 @@
 use anyhow::anyhow;
+use dotenvy::{dotenv, from_filename};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::env;
 
@@ -82,5 +83,31 @@ impl Serialize for SecretValue {
         };
 
         serialized.serialize(serializer)
+    }
+}
+
+pub fn load_dotenv(path: Option<impl AsRef<str>>, preserve: bool) {
+    if preserve {
+        match path {
+            Some(p) => match dotenvy::from_filename(p.as_ref()) {
+                Ok(_) => println!("Loaded .env file from {}", p.as_ref()),
+                Err(e) => println!("No .env file found at {}: {}", p.as_ref(), e),
+            },
+            None => match from_filename(".env") {
+                Ok(_) => println!("Loaded .env file from root directory"),
+                Err(e) => println!("No .env file found at root directory: {}", e),
+            },
+        }
+    } else {
+        match path {
+            Some(p) => match dotenvy::from_filename_override(p.as_ref()) {
+                Ok(_) => println!("Loaded env file from {}", p.as_ref()),
+                Err(e) => println!("No env file found at {}: {}", p.as_ref(), e),
+            },
+            None => match dotenvy::from_filename_override(".env") {
+                Ok(_) => println!("Loaded .env file from root directory"),
+                Err(e) => println!("No .env file found at root directory: {}", e),
+            },
+        }
     }
 }
