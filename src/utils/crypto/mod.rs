@@ -3,6 +3,8 @@ use dotenvy::from_filename;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::env;
 
+/// A secret value that can be loaded from an environment variable
+/// or set directly. When serialized, the actual value is hidden.
 #[derive(Debug, Clone, Default)]
 pub struct SecretValue {
     value: String,
@@ -86,6 +88,9 @@ impl Serialize for SecretValue {
     }
 }
 
+/// Loads environment variables from a .env file.
+/// If `preserve` is true, existing environment variables will not be overwritten.
+/// If `path` is None, it will look for a .env file in the current directory.
 pub fn load_env_variables(path: Option<impl AsRef<str>>, preserve: bool) -> anyhow::Result<()> {
     if preserve {
         match path {
