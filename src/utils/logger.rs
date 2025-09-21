@@ -9,6 +9,8 @@ pub struct LoggerConfig {
     pub file_dir: Option<String>,
     pub file_prefix: Option<String>,
     pub rolling: Option<String>,
+    #[serde(default)]
+    pub max_files: usize,
 }
 
 impl LoggerConfig {
@@ -26,6 +28,7 @@ impl LoggerConfig {
             file_dir,
             file_prefix,
             rolling,
+            max_files: 2,
         }
     }
 }
@@ -37,6 +40,7 @@ impl Default for LoggerConfig {
             file_dir: None,
             file_prefix: None,
             rolling: Some("daily".to_string()),
+            max_files: 2,
         }
     }
 }
@@ -57,7 +61,7 @@ pub fn init_logging(
 
         let appender: RollingFileAppender = RollingFileAppender::builder()
             .rotation(rotation)
-            .max_log_files(0)
+            .max_log_files(cfg.max_files)
             .filename_prefix(prefix)
             .build(dir_str)
             .with_context(|| format!("failed to create rolling appender in {}", dir_str))?;
