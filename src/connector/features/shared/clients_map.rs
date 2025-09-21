@@ -39,20 +39,18 @@ impl<Client: ClientInitializer<Config>, Config: Clone> ClientsMap<Client, Config
         let mut id_seen: HashSet<usize> = HashSet::default();
 
         for spec in config.specific.iter() {
-            if let Some(ip) = spec.ip.as_ref() {
-                if !id_seen.insert(spec.id) {
-                    tracing::warn!(
-                        "[CientsPool] ID <{}> of IP <{}> addr is not unique",
-                        spec.id,
-                        ip
-                    );
-                    continue;
-                }
-
-                let client = Client::init(spec)?;
-
-                clients_map.insert(spec.id, client);
+            if !id_seen.insert(spec.id) {
+                tracing::warn!(
+                    "[CientsPool] ID <{}> of IP <{:?}> addr is not unique",
+                    spec.id,
+                    spec.ip
+                );
+                continue;
             }
+
+            let client = Client::init(spec)?;
+
+            clients_map.insert(spec.id, client);
         }
 
         if let Some(spec) = &config.default {
