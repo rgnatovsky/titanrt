@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use dotenvy::{dotenv, from_filename};
+use dotenvy::from_filename;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::env;
 
@@ -86,7 +86,7 @@ impl Serialize for SecretValue {
     }
 }
 
-pub fn load_dotenv(path: Option<impl AsRef<str>>, preserve: bool) {
+pub fn load_env_variables(path: Option<impl AsRef<str>>, preserve: bool) {
     if preserve {
         match path {
             Some(p) => match dotenvy::from_filename(p.as_ref()) {
