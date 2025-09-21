@@ -3,7 +3,7 @@ use std::str::FromStr;
 use tracing::Level;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct LoggerConfig {
     pub level: String,
     pub file_dir: Option<String>,
