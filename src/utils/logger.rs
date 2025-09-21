@@ -11,6 +11,22 @@ pub struct LoggerConfig {
     pub rolling: Option<String>,
 }
 
+impl LoggerConfig {
+    pub fn from_env() -> Self {
+        let level = std::env::var("LOG_LEVEL").unwrap_or_else(|_| "info".to_string());
+        let file_dir = std::env::var("LOG_FILE_DIR").ok();
+        let file_prefix = std::env::var("LOG_FILE_PREFIX").ok();
+        let rolling = std::env::var("LOG_ROLLING").ok();
+
+        Self {
+            level,
+            file_dir,
+            file_prefix,
+            rolling,
+        }
+    }
+}
+
 impl Default for LoggerConfig {
     fn default() -> Self {
         Self {
