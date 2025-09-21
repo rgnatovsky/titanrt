@@ -10,3 +10,4 @@ pub mod crypto;
 mod health_flag;
 mod state;
 pub mod time;
+pub mod logger;
