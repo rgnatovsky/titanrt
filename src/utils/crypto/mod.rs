@@ -86,28 +86,31 @@ impl Serialize for SecretValue {
     }
 }
 
-pub fn load_env_variables(path: Option<impl AsRef<str>>, preserve: bool) {
+pub fn load_env_variables(path: Option<impl AsRef<str>>, preserve: bool) -> anyhow::Result<()> {
     if preserve {
         match path {
             Some(p) => match dotenvy::from_filename(p.as_ref()) {
                 Ok(_) => println!("Loaded .env file from {}", p.as_ref()),
-                Err(e) => println!("No .env file found at {}: {}", p.as_ref(), e),
+
+                Err(e) => return Err(anyhow!("No .env file found at {}: {}", p.as_ref(), e)),
             },
             None => match from_filename(".env") {
                 Ok(_) => println!("Loaded .env file from root directory"),
-                Err(e) => println!("No .env file found at root directory: {}", e),
+                Err(e) => return Err(anyhow!("No .env file found at root directory: {}", e)),
             },
         }
     } else {
         match path {
             Some(p) => match dotenvy::from_filename_override(p.as_ref()) {
                 Ok(_) => println!("Loaded env file from {}", p.as_ref()),
-                Err(e) => println!("No env file found at {}: {}", p.as_ref(), e),
+                Err(e) => return Err(anyhow!("No env file found at {}: {}", p.as_ref(), e)),
             },
             None => match dotenvy::from_filename_override(".env") {
                 Ok(_) => println!("Loaded .env file from root directory"),
-                Err(e) => println!("No .env file found at root directory: {}", e),
+                Err(e) => return Err(anyhow!("No .env file found at root directory: {}", e)),
             },
         }
     }
+
+    Ok(())
 }
