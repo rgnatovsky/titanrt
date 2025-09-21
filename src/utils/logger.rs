@@ -12,6 +12,9 @@ pub struct LoggerConfig {
 }
 
 impl LoggerConfig {
+    /// Loads logging configuration from environment variables.
+    /// If a variable is not set, it will use a default value.
+    /// Filled in variables are: LOG_LEVEL, LOG_FILE_DIR, LOG_FILE_PREFIX, LOG_ROLLING
     pub fn from_env() -> Self {
         let level = std::env::var("LOG_LEVEL").unwrap_or_else(|_| "info".to_string());
         let file_dir = std::env::var("LOG_FILE_DIR").ok();

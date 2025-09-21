@@ -91,13 +91,13 @@ impl Serialize for SecretValue {
 /// Loads environment variables from a .env file.
 /// If `preserve` is true, existing environment variables will not be overwritten.
 /// If `path` is None, it will look for a .env file in the current directory.
-pub fn load_env_variables(path: Option<impl AsRef<str>>, preserve: bool) -> anyhow::Result<()> {
+pub fn load_env_variables(filename: Option<&str>, preserve: bool) -> anyhow::Result<()> {
     if preserve {
-        match path {
-            Some(p) => match dotenvy::from_filename(p.as_ref()) {
-                Ok(_) => println!("Loaded .env file from {}", p.as_ref()),
+        match filename {
+            Some(p) => match dotenvy::from_filename(p) {
+                Ok(_) => println!("Loaded .env file from {}", p),
 
-                Err(e) => return Err(anyhow!("No .env file found at {}: {}", p.as_ref(), e)),
+                Err(e) => return Err(anyhow!("No .env file found at {}: {}", p, e)),
             },
             None => match from_filename(".env") {
                 Ok(_) => println!("Loaded .env file from root directory"),
@@ -105,10 +105,10 @@ pub fn load_env_variables(path: Option<impl AsRef<str>>, preserve: bool) -> anyh
             },
         }
     } else {
-        match path {
-            Some(p) => match dotenvy::from_filename_override(p.as_ref()) {
-                Ok(_) => println!("Loaded env file from {}", p.as_ref()),
-                Err(e) => return Err(anyhow!("No env file found at {}: {}", p.as_ref(), e)),
+        match filename {
+            Some(p) => match dotenvy::from_filename_override(p) {
+                Ok(_) => println!("Loaded env file from {}", p),
+                Err(e) => return Err(anyhow!("No env file found at {}: {}", p, e)),
             },
             None => match dotenvy::from_filename_override(".env") {
                 Ok(_) => println!("Loaded .env file from root directory"),
