@@ -5,105 +5,32 @@ use crate::connector::features::shared::events::StreamEvent;
 use crate::connector::features::shared::rate_limiter::RateLimitManager;
 use crate::connector::features::tonic::client::{TonicChannelSpec, TonicClient};
 use crate::connector::features::tonic::connector::TonicConnector;
-use crate::connector::features::tonic::streaming::actions::{ConnectConfig, StreamingActionInner};
-use crate::connector::features::tonic::streaming::codec::RawCodec;
-use crate::connector::features::tonic::streaming::descriptor::{
-    StreamingMode, TonicStreamingDescriptor,
-};
+use crate::connector::features::tonic::streaming::StreamingMode;
+use crate::connector::features::tonic::streaming::actions::StreamingActionInner;
+use crate::connector::features::tonic::streaming::descriptor::TonicStreamingDescriptor;
 use crate::connector::features::tonic::streaming::event::StreamingEvent;
+use crate::connector::features::tonic::streaming::handle_bidi::start_bidi_stream;
+use crate::connector::features::tonic::streaming::handle_client::start_client_stream;
+use crate::connector::features::tonic::streaming::handle_server::start_server_stream;
+use crate::connector::features::tonic::streaming::utils::{
+    ActiveStream, StreamContext, StreamLifecycle, emit_event,
+};
 use crate::connector::{Hook, HookArgs, IntoHook, RuntimeCtx, StreamRunner, StreamSpawner};
 use crate::io::ringbuffer::RingSender;
 use crate::prelude::{BaseRx, TxPairExt};
 use crate::utils::{Reducer, StateMarker};
 
 use anyhow::anyhow;
-use bytes::Bytes;
-use crossbeam::channel::{Sender, unbounded};
-use futures::{Stream, StreamExt};
-use serde_json::Value;
-use std::borrow::Cow;
+use crossbeam::channel::unbounded;
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::rc::Rc;
-use std::task::{Context, Poll};
+
 use std::time::Duration;
 use tokio::runtime::Builder;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::Mutex;
 use tokio::task::LocalSet;
 use tokio::time::sleep;
-use tonic::client::Grpc;
-use tonic::transport::Channel;
-use tonic::{Request, Status};
-use uuid::Uuid;
-
-struct ActiveStream {
-    mode: StreamingMode,
-    sender: Option<mpsc::Sender<Bytes>>,
-    handle: tokio::task::JoinHandle<()>,
-}
-
-impl ActiveStream {
-    fn stop(mut self) {
-        if let Some(sender) = self.sender.take() {
-            drop(sender);
-        }
-        self.handle.abort();
-    }
-}
-
-enum StreamLifecycle {
-    Closed { conn_id: usize },
-}
-
-#[derive(Clone)]
-struct StreamContext {
-    req_id: Option<Uuid>,
-    label: Option<String>,
-    payload: Option<Value>,
-}
-
-fn emit_event(
-    sender: &Sender<StreamEvent<StreamingEvent>>,
-    conn_id: usize,
-    req_id: Option<Uuid>,
-    label: Option<&String>,
-    payload: Option<&Value>,
-    inner: StreamingEvent,
-) {
-    let mut builder = StreamEvent::builder(Some(inner))
-        .conn_id(Some(conn_id))
-        .req_id(req_id);
-
-    if let Some(label) = label {
-        builder = builder.label(Some(Cow::Owned(label.clone())));
-    }
-
-    if let Some(payload) = payload {
-        builder = builder.payload(Some(payload.clone()));
-    }
-
-    if let Ok(event) = builder.build() {
-        let _ = sender.try_send(event);
-    }
-}
-struct MpscBytesStream {
-    inner: mpsc::Receiver<Bytes>,
-}
-
-impl MpscBytesStream {
-    fn new(inner: mpsc::Receiver<Bytes>) -> Self {
-        Self { inner }
-    }
-}
-
-impl Stream for MpscBytesStream {
-    type Item = Bytes;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-        this.inner.poll_recv(cx)
-    }
-}
+use tonic::Status;
 
 impl<E, R, S> StreamSpawner<TonicStreamingDescriptor, E, R, S> for TonicConnector
 where
@@ -178,7 +105,7 @@ where
             }
 
             while let Ok(action) = ctx.action_rx.try_recv() {
-                let (inner, conn_id_opt, req_id, label, timeout, rl_ctx, rl_weight, payload) =
+                let (inner, conn_id, req_id, label, timeout, rl_ctx, rl_weight, payload) =
                     action.into_parts();
 
                 let inner = match inner {
@@ -186,12 +113,12 @@ where
                     None => continue,
                 };
 
-                let conn_id = match conn_id_opt {
+                let conn_id = match conn_id {
                     Some(id) => id,
                     None => {
                         emit_event(
                             &res_tx,
-                            usize::MAX,
+                            None,
                             req_id,
                             None,
                             payload.as_ref(),
@@ -212,10 +139,10 @@ where
                             prev.stop();
                         }
 
-                        let Some(client) = ctx.cfg.get(&conn_id).cloned() else {
+                        let Some(client) = ctx.cfg.get(&conn_id) else {
                             emit_event(
                                 &res_tx,
-                                conn_id,
+                                Some(conn_id),
                                 req_id,
                                 label.as_ref(),
                                 payload.as_ref(),
@@ -233,27 +160,61 @@ where
                             payload: payload.clone(),
                         };
 
-                        let result = start_stream(
-                            ctx.desc.mode(),
-                            connect,
-                            conn_id,
-                            context,
-                            channel,
-                            res_tx.clone(),
-                            lifecycle_tx.clone(),
-                            if rl_ctx.is_some() {
-                                Some(rl_manager.clone())
-                            } else {
-                                None
-                            },
-                            rl_ctx.clone(),
-                            rl_weight,
-                            timeout,
-                            ctx.desc.max_decoding_message_size,
-                            ctx.desc.max_encoding_message_size,
-                            ctx.desc.outbound_buffer,
-                            &local,
-                        );
+                        let rl_manager = if rl_ctx.is_some() {
+                            Some(rl_manager.clone())
+                        } else {
+                            None
+                        };
+
+                        let result = match connect.mode {
+                            StreamingMode::Server => start_server_stream(
+                                connect,
+                                conn_id,
+                                context,
+                                channel,
+                                res_tx.clone(),
+                                lifecycle_tx.clone(),
+                                rl_manager,
+                                rl_ctx,
+                                rl_weight,
+                                timeout,
+                                ctx.desc.max_decoding_message_size,
+                                ctx.desc.max_encoding_message_size,
+                                &local,
+                            ),
+                            StreamingMode::Client => start_client_stream(
+                                connect,
+                                conn_id,
+                                context,
+                                channel,
+                                res_tx.clone(),
+                                lifecycle_tx.clone(),
+                                rl_manager,
+                                rl_ctx,
+                                rl_weight,
+                                timeout,
+                                ctx.desc.max_decoding_message_size,
+                                ctx.desc.max_encoding_message_size,
+                                ctx.desc.outbound_buffer,
+                                &local,
+                            ),
+                            StreamingMode::Bidi => start_bidi_stream(
+                                connect,
+                                conn_id,
+                                context,
+                                channel,
+                                res_tx.clone(),
+                                lifecycle_tx.clone(),
+                                rl_manager,
+                                rl_ctx,
+                                rl_weight,
+                                timeout,
+                                ctx.desc.max_decoding_message_size,
+                                ctx.desc.max_encoding_message_size,
+                                ctx.desc.outbound_buffer,
+                                &local,
+                            ),
+                        };
 
                         match result {
                             Ok(active) => {
@@ -262,7 +223,7 @@ where
                             Err(status) => {
                                 emit_event(
                                     &res_tx,
-                                    conn_id,
+                                    Some(conn_id),
                                     req_id,
                                     label.as_ref(),
                                     payload.as_ref(),
@@ -275,7 +236,7 @@ where
                         let Some(active) = active_streams.get(&conn_id) else {
                             emit_event(
                                 &res_tx,
-                                conn_id,
+                                Some(conn_id),
                                 req_id,
                                 label.as_ref(),
                                 payload.as_ref(),
@@ -290,7 +251,7 @@ where
                             StreamingMode::Server => {
                                 emit_event(
                                     &res_tx,
-                                    conn_id,
+                                    Some(conn_id),
                                     req_id,
                                     label.as_ref(),
                                     payload.as_ref(),
@@ -303,7 +264,7 @@ where
                                 let Some(sender) = active.sender.clone() else {
                                     emit_event(
                                         &res_tx,
-                                        conn_id,
+                                        Some(conn_id),
                                         req_id,
                                         label.as_ref(),
                                         payload.as_ref(),
@@ -314,23 +275,40 @@ where
                                     continue;
                                 };
 
-                                spawn_send_task(
-                                    &local,
-                                    sender,
-                                    message,
-                                    conn_id,
-                                    req_id,
-                                    label.clone(),
-                                    payload.clone(),
-                                    res_tx.clone(),
-                                    if rl_ctx.is_some() {
-                                        Some(rl_manager.clone())
-                                    } else {
-                                        None
-                                    },
-                                    rl_ctx.clone(),
-                                    rl_weight,
-                                );
+                                let rl_manager = if rl_ctx.is_some() {
+                                    Some(rl_manager.clone())
+                                } else {
+                                    None
+                                };
+                                let res_tx_ref = res_tx.clone();
+
+                                local.spawn_local(async move {
+                                    if let (Some(manager), Some(ctx_bytes)) =
+                                        (&rl_manager, rl_ctx.as_ref())
+                                    {
+                                        if let Some(plan) = {
+                                            let mut guard = manager.lock().await;
+                                            guard.plan(ctx_bytes, rl_weight)
+                                        } {
+                                            for (bucket, weight) in plan {
+                                                bucket.wait(weight).await;
+                                            }
+                                        }
+                                    }
+
+                                    if let Err(err) = sender.send(message).await {
+                                        emit_event(
+                                            &res_tx_ref,
+                                            Some(conn_id),
+                                            req_id,
+                                            label.as_ref(),
+                                            payload.as_ref(),
+                                            StreamingEvent::from_status(Status::unavailable(
+                                                format!("streaming message send failed: {}", err),
+                                            )),
+                                        );
+                                    }
+                                });
                             }
                         }
                     }
@@ -338,7 +316,7 @@ where
                         let Some(active) = active_streams.get_mut(&conn_id) else {
                             emit_event(
                                 &res_tx,
-                                conn_id,
+                                Some(conn_id),
                                 req_id,
                                 label.as_ref(),
                                 payload.as_ref(),
@@ -358,7 +336,7 @@ where
                             StreamingMode::Server => {
                                 emit_event(
                                     &res_tx,
-                                    conn_id,
+                                    Some(conn_id),
                                     req_id,
                                     label.as_ref(),
                                     payload.as_ref(),
@@ -373,7 +351,7 @@ where
                         let Some(active) = active_streams.remove(&conn_id) else {
                             emit_event(
                                 &res_tx,
-                                conn_id,
+                                Some(conn_id),
                                 req_id,
                                 label.as_ref(),
                                 payload.as_ref(),
@@ -387,7 +365,7 @@ where
                         active.stop();
                         emit_event(
                             &res_tx,
-                            conn_id,
+                            Some(conn_id),
                             req_id,
                             label.as_ref(),
                             payload.as_ref(),
@@ -427,576 +405,4 @@ where
             }));
         }
     }
-}
-fn start_stream(
-    mode: StreamingMode,
-    connect: ConnectConfig,
-    conn_id: usize,
-    context: StreamContext,
-    channel: Channel,
-    res_tx: Sender<StreamEvent<StreamingEvent>>,
-    lifecycle_tx: Sender<StreamLifecycle>,
-    rl_manager: Option<Rc<Mutex<RateLimitManager>>>,
-    rl_ctx: Option<Bytes>,
-    rl_weight: Option<usize>,
-    timeout: Option<Duration>,
-    max_dec_size: Option<usize>,
-    max_enc_size: Option<usize>,
-    outbound_buffer: usize,
-    local: &LocalSet,
-) -> Result<ActiveStream, Status> {
-    match mode {
-        StreamingMode::Server => start_server_stream(
-            connect,
-            conn_id,
-            context,
-            channel,
-            res_tx,
-            lifecycle_tx,
-            rl_manager,
-            rl_ctx,
-            rl_weight,
-            timeout,
-            max_dec_size,
-            max_enc_size,
-            local,
-        ),
-        StreamingMode::Client => start_client_stream(
-            connect,
-            conn_id,
-            context,
-            channel,
-            res_tx,
-            lifecycle_tx,
-            rl_manager,
-            rl_ctx,
-            rl_weight,
-            timeout,
-            max_dec_size,
-            max_enc_size,
-            outbound_buffer,
-            local,
-        ),
-        StreamingMode::Bidi => start_bidi_stream(
-            connect,
-            conn_id,
-            context,
-            channel,
-            res_tx,
-            lifecycle_tx,
-            rl_manager,
-            rl_ctx,
-            rl_weight,
-            timeout,
-            max_dec_size,
-            max_enc_size,
-            outbound_buffer,
-            local,
-        ),
-    }
-}
-
-fn start_server_stream(
-    connect: ConnectConfig,
-    conn_id: usize,
-    context: StreamContext,
-    channel: Channel,
-    res_tx: Sender<StreamEvent<StreamingEvent>>,
-    lifecycle_tx: Sender<StreamLifecycle>,
-    rl_manager: Option<Rc<Mutex<RateLimitManager>>>,
-    rl_ctx: Option<Bytes>,
-    rl_weight: Option<usize>,
-    timeout: Option<Duration>,
-    max_dec_size: Option<usize>,
-    max_enc_size: Option<usize>,
-    local: &LocalSet,
-) -> Result<ActiveStream, Status> {
-    let ConnectConfig {
-        method,
-        initial_message,
-        metadata,
-    } = connect;
-
-    let initial_payload = initial_message.unwrap_or_else(Bytes::new);
-    let handle = local.spawn_local(async move {
-        let StreamContext {
-            req_id,
-            label,
-            payload,
-        } = context;
-        let mut grpc = Grpc::new(channel);
-
-        if let Some(size) = max_dec_size {
-            grpc = grpc.max_decoding_message_size(size);
-        }
-        if let Some(size) = max_enc_size {
-            grpc = grpc.max_encoding_message_size(size);
-        }
-
-        if let (Some(manager), Some(ctx_bytes)) = (&rl_manager, rl_ctx.as_ref()) {
-            if let Some(plan) = {
-                let mut guard = manager.lock().await;
-                guard.plan(ctx_bytes, rl_weight)
-            } {
-                for (bucket, weight) in plan {
-                    bucket.wait(weight).await;
-                }
-            }
-        }
-
-        if let Err(e) = grpc.ready().await {
-            emit_event(
-                &res_tx,
-                conn_id,
-                req_id,
-                label.as_ref(),
-                payload.as_ref(),
-                StreamingEvent::from_status(Status::unavailable(format!(
-                    "[TonicStream - Runner] channel not ready with error: {e}",
-                ))),
-            );
-            let _ = lifecycle_tx.send(StreamLifecycle::Closed { conn_id });
-            return;
-        }
-
-        let mut request = Request::new(initial_payload);
-        *request.metadata_mut() = metadata.clone();
-
-        let call = grpc.server_streaming(request, method.clone(), RawCodec);
-        let response = match timeout {
-            Some(t) => match tokio::time::timeout(t, call).await {
-                Ok(res) => res,
-                Err(_) => {
-                    emit_event(
-                        &res_tx,
-                        conn_id,
-                        req_id,
-                        label.as_ref(),
-                        payload.as_ref(),
-                        StreamingEvent::from_status(Status::deadline_exceeded("connect timeout")),
-                    );
-                    let _ = lifecycle_tx.send(StreamLifecycle::Closed { conn_id });
-                    return;
-                }
-            },
-            None => call.await,
-        };
-
-        match response {
-            Ok(resp) => {
-                let mut inbound = resp.into_inner();
-                while let Some(item) = inbound.next().await {
-                    match item {
-                        Ok(bytes) => {
-                            emit_event(
-                                &res_tx,
-                                conn_id,
-                                req_id,
-                                label.as_ref(),
-                                payload.as_ref(),
-                                StreamingEvent::from_ok_stream_item(bytes),
-                            );
-                        }
-                        Err(status) => {
-                            emit_event(
-                                &res_tx,
-                                conn_id,
-                                req_id,
-                                label.as_ref(),
-                                payload.as_ref(),
-                                StreamingEvent::from_status(status),
-                            );
-                            break;
-                        }
-                    }
-                }
-
-                match inbound.trailers().await {
-                    Ok(Some(trailers)) => emit_event(
-                        &res_tx,
-                        conn_id,
-                        req_id,
-                        label.as_ref(),
-                        payload.as_ref(),
-                        StreamingEvent::from_ok_stream_close(trailers),
-                    ),
-                    Ok(None) => emit_event(
-                        &res_tx,
-                        conn_id,
-                        req_id,
-                        label.as_ref(),
-                        payload.as_ref(),
-                        StreamingEvent::from_ok_stream_close(metadata.clone()),
-                    ),
-                    Err(status) => emit_event(
-                        &res_tx,
-                        conn_id,
-                        req_id,
-                        label.as_ref(),
-                        payload.as_ref(),
-                        StreamingEvent::from_status(status),
-                    ),
-                }
-            }
-            Err(status) => {
-                emit_event(
-                    &res_tx,
-                    conn_id,
-                    req_id,
-                    label.as_ref(),
-                    payload.as_ref(),
-                    StreamingEvent::from_status(status),
-                );
-            }
-        }
-
-        let _ = lifecycle_tx.send(StreamLifecycle::Closed { conn_id });
-    });
-
-    Ok(ActiveStream {
-        mode: StreamingMode::Server,
-        sender: None,
-        handle,
-    })
-}
-fn start_client_stream(
-    connect: ConnectConfig,
-    conn_id: usize,
-    context: StreamContext,
-    channel: Channel,
-    res_tx: Sender<StreamEvent<StreamingEvent>>,
-    lifecycle_tx: Sender<StreamLifecycle>,
-    rl_manager: Option<Rc<Mutex<RateLimitManager>>>,
-    rl_ctx: Option<Bytes>,
-    rl_weight: Option<usize>,
-    timeout: Option<Duration>,
-    max_dec_size: Option<usize>,
-    max_enc_size: Option<usize>,
-    outbound_buffer: usize,
-    local: &LocalSet,
-) -> Result<ActiveStream, Status> {
-    let ConnectConfig {
-        method,
-        initial_message,
-        metadata,
-    } = connect;
-
-    let buffer = outbound_buffer.max(1);
-    let (tx, rx) = mpsc::channel::<Bytes>(buffer);
-
-    if let Some(initial) = initial_message {
-        tx.try_send(initial).map_err(|e| {
-            Status::resource_exhausted(format!("initial message buffered send failed: {e}"))
-        })?;
-    }
-
-    let handle = local.spawn_local(async move {
-        let StreamContext {
-            req_id,
-            label,
-            payload,
-        } = context;
-        let mut grpc = Grpc::new(channel);
-
-        if let Some(size) = max_dec_size {
-            grpc = grpc.max_decoding_message_size(size);
-        }
-        if let Some(size) = max_enc_size {
-            grpc = grpc.max_encoding_message_size(size);
-        }
-
-        if let (Some(manager), Some(ctx_bytes)) = (&rl_manager, rl_ctx.as_ref()) {
-            if let Some(plan) = {
-                let mut guard = manager.lock().await;
-                guard.plan(ctx_bytes, rl_weight)
-            } {
-                for (bucket, weight) in plan {
-                    bucket.wait(weight).await;
-                }
-            }
-        }
-
-        if let Err(e) = grpc.ready().await {
-            emit_event(
-                &res_tx,
-                conn_id,
-                req_id,
-                label.as_ref(),
-                payload.as_ref(),
-                StreamingEvent::from_status(Status::unavailable(format!(
-                    "[TonicStream - Runner] channel not ready with error: {e}",
-                ))),
-            );
-            let _ = lifecycle_tx.send(StreamLifecycle::Closed { conn_id });
-            return;
-        }
-
-        let outbound = MpscBytesStream::new(rx);
-        let mut request = Request::new(outbound);
-        *request.metadata_mut() = metadata.clone();
-
-        let call = grpc.client_streaming(request, method.clone(), RawCodec);
-        let response = match timeout {
-            Some(t) => match tokio::time::timeout(t, call).await {
-                Ok(res) => res,
-                Err(_) => {
-                    emit_event(
-                        &res_tx,
-                        conn_id,
-                        req_id,
-                        label.as_ref(),
-                        payload.as_ref(),
-                        StreamingEvent::from_status(Status::deadline_exceeded("connect timeout")),
-                    );
-                    let _ = lifecycle_tx.send(StreamLifecycle::Closed { conn_id });
-                    return;
-                }
-            },
-            None => call.await,
-        };
-
-        match response {
-            Ok(resp) => {
-                emit_event(
-                    &res_tx,
-                    conn_id,
-                    req_id,
-                    label.as_ref(),
-                    payload.as_ref(),
-                    StreamingEvent::from_ok_unary(resp),
-                );
-            }
-            Err(status) => {
-                emit_event(
-                    &res_tx,
-                    conn_id,
-                    req_id,
-                    label.as_ref(),
-                    payload.as_ref(),
-                    StreamingEvent::from_status(status),
-                );
-            }
-        }
-
-        let _ = lifecycle_tx.send(StreamLifecycle::Closed { conn_id });
-    });
-
-    Ok(ActiveStream {
-        mode: StreamingMode::Client,
-        sender: Some(tx),
-        handle,
-    })
-}
-fn start_bidi_stream(
-    connect: ConnectConfig,
-    conn_id: usize,
-    context: StreamContext,
-    channel: Channel,
-    res_tx: Sender<StreamEvent<StreamingEvent>>,
-    lifecycle_tx: Sender<StreamLifecycle>,
-    rl_manager: Option<Rc<Mutex<RateLimitManager>>>,
-    rl_ctx: Option<Bytes>,
-    rl_weight: Option<usize>,
-    timeout: Option<Duration>,
-    max_dec_size: Option<usize>,
-    max_enc_size: Option<usize>,
-    outbound_buffer: usize,
-    local: &LocalSet,
-) -> Result<ActiveStream, Status> {
-    let ConnectConfig {
-        method,
-        initial_message,
-        metadata,
-    } = connect;
-
-    let buffer = outbound_buffer.max(1);
-    let (tx, rx) = mpsc::channel::<Bytes>(buffer);
-
-    if let Some(initial) = initial_message {
-        tx.try_send(initial).map_err(|e| {
-            Status::resource_exhausted(format!("initial message buffered send failed: {e}"))
-        })?;
-    }
-
-    let handle = local.spawn_local(async move {
-        let StreamContext {
-            req_id,
-            label,
-            payload,
-        } = context;
-        let mut grpc = Grpc::new(channel);
-
-        if let Some(size) = max_dec_size {
-            grpc = grpc.max_decoding_message_size(size);
-        }
-        if let Some(size) = max_enc_size {
-            grpc = grpc.max_encoding_message_size(size);
-        }
-
-        if let (Some(manager), Some(ctx_bytes)) = (&rl_manager, rl_ctx.as_ref()) {
-            if let Some(plan) = {
-                let mut guard = manager.lock().await;
-                guard.plan(ctx_bytes, rl_weight)
-            } {
-                for (bucket, weight) in plan {
-                    bucket.wait(weight).await;
-                }
-            }
-        }
-
-        if let Err(e) = grpc.ready().await {
-            emit_event(
-                &res_tx,
-                conn_id,
-                req_id,
-                label.as_ref(),
-                payload.as_ref(),
-                StreamingEvent::from_status(Status::unavailable(format!(
-                    "[TonicStream - Runner] channel not ready with error: {e}",
-                ))),
-            );
-            let _ = lifecycle_tx.send(StreamLifecycle::Closed { conn_id });
-            return;
-        }
-
-        let outbound = MpscBytesStream::new(rx);
-        let mut request = Request::new(outbound);
-        *request.metadata_mut() = metadata.clone();
-
-        let call = grpc.streaming(request, method.clone(), RawCodec);
-        let response = match timeout {
-            Some(t) => match tokio::time::timeout(t, call).await {
-                Ok(res) => res,
-                Err(_) => {
-                    emit_event(
-                        &res_tx,
-                        conn_id,
-                        req_id,
-                        label.as_ref(),
-                        payload.as_ref(),
-                        StreamingEvent::from_status(Status::deadline_exceeded("connect timeout")),
-                    );
-                    let _ = lifecycle_tx.send(StreamLifecycle::Closed { conn_id });
-                    return;
-                }
-            },
-            None => call.await,
-        };
-
-        match response {
-            Ok(resp) => {
-                let mut inbound = resp.into_inner();
-                while let Some(item) = inbound.next().await {
-                    match item {
-                        Ok(bytes) => {
-                            emit_event(
-                                &res_tx,
-                                conn_id,
-                                req_id,
-                                label.as_ref(),
-                                payload.as_ref(),
-                                StreamingEvent::from_ok_stream_item(bytes),
-                            );
-                        }
-                        Err(status) => {
-                            emit_event(
-                                &res_tx,
-                                conn_id,
-                                req_id,
-                                label.as_ref(),
-                                payload.as_ref(),
-                                StreamingEvent::from_status(status),
-                            );
-                            break;
-                        }
-                    }
-                }
-
-                match inbound.trailers().await {
-                    Ok(Some(trailers)) => emit_event(
-                        &res_tx,
-                        conn_id,
-                        req_id,
-                        label.as_ref(),
-                        payload.as_ref(),
-                        StreamingEvent::from_ok_stream_close(trailers),
-                    ),
-                    Ok(None) => emit_event(
-                        &res_tx,
-                        conn_id,
-                        req_id,
-                        label.as_ref(),
-                        payload.as_ref(),
-                        StreamingEvent::from_ok_stream_close(metadata.clone()),
-                    ),
-                    Err(status) => emit_event(
-                        &res_tx,
-                        conn_id,
-                        req_id,
-                        label.as_ref(),
-                        payload.as_ref(),
-                        StreamingEvent::from_status(status),
-                    ),
-                }
-            }
-            Err(status) => {
-                emit_event(
-                    &res_tx,
-                    conn_id,
-                    req_id,
-                    label.as_ref(),
-                    payload.as_ref(),
-                    StreamingEvent::from_status(status),
-                );
-            }
-        }
-
-        let _ = lifecycle_tx.send(StreamLifecycle::Closed { conn_id });
-    });
-
-    Ok(ActiveStream {
-        mode: StreamingMode::Bidi,
-        sender: Some(tx),
-        handle,
-    })
-}
-fn spawn_send_task(
-    local: &LocalSet,
-    sender: mpsc::Sender<Bytes>,
-    message: Bytes,
-    conn_id: usize,
-    req_id: Option<Uuid>,
-    label: Option<String>,
-    payload: Option<Value>,
-    res_tx: Sender<StreamEvent<StreamingEvent>>,
-    rl_manager: Option<Rc<Mutex<RateLimitManager>>>,
-    rl_ctx: Option<Bytes>,
-    rl_weight: Option<usize>,
-) {
-    local.spawn_local(async move {
-        if let (Some(manager), Some(ctx_bytes)) = (&rl_manager, rl_ctx.as_ref()) {
-            if let Some(plan) = {
-                let mut guard = manager.lock().await;
-                guard.plan(ctx_bytes, rl_weight)
-            } {
-                for (bucket, weight) in plan {
-                    bucket.wait(weight).await;
-                }
-            }
-        }
-
-        if let Err(err) = sender.send(message).await {
-            emit_event(
-                &res_tx,
-                conn_id,
-                req_id,
-                label.as_ref(),
-                payload.as_ref(),
-                StreamingEvent::from_status(Status::unavailable(format!(
-                    "stream send failed: {}",
-                    err
-                ))),
-            );
-        }
-    });
 }

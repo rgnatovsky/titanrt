@@ -1,6 +1,29 @@
+use std::fmt;
+
 use bytes::Bytes;
+use serde::Deserialize;
 use tonic::codegen::http::uri::PathAndQuery;
 use tonic::metadata::{AsciiMetadataKey, MetadataMap, MetadataValue};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamingMode {
+    Server,
+    Client,
+    Bidi,
+}
+
+
+impl fmt::Display for StreamingMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let repr = match self {
+            StreamingMode::Server => "server_streaming",
+            StreamingMode::Client => "client_streaming",
+            StreamingMode::Bidi => "bidi_streaming",
+        };
+        f.write_str(repr)
+    }
+}
 
 /// Control plane instructions for a persistent tonic streaming session.
 #[derive(Debug, Clone)]
@@ -17,14 +40,15 @@ pub enum StreamingActionInner {
 
 #[derive(Debug, Clone)]
 pub struct ConnectConfig {
+    pub mode: StreamingMode,
     pub method: PathAndQuery,
     pub initial_message: Option<Bytes>,
     pub metadata: MetadataMap,
 }
 
 impl StreamingActionInner {
-    pub fn connect(method: &str) -> StreamingConnectBuilder {
-        StreamingConnectBuilder::new(method)
+    pub fn connect(method: &str, mode: StreamingMode) -> StreamingConnectBuilder {
+        StreamingConnectBuilder::new(method, mode)
     }
 
     pub fn send(message: Bytes) -> Self {
@@ -42,14 +66,16 @@ impl StreamingActionInner {
 
 #[derive(Debug, Clone)]
 pub struct StreamingConnectBuilder {
+    mode: StreamingMode,
     method: PathAndQuery,
     initial_message: Option<Bytes>,
     metadata: MetadataMap,
 }
 
 impl StreamingConnectBuilder {
-    fn new(method: &str) -> Self {
+    fn new(method: &str, mode: StreamingMode) -> Self {
         Self {
+            mode,
             method: method
                 .parse()
                 .expect("invalid gRPC method path for streaming connect"),
@@ -87,6 +113,7 @@ impl StreamingConnectBuilder {
 
     pub fn build(self) -> StreamingActionInner {
         StreamingActionInner::Connect(ConnectConfig {
+            mode: self.mode,
             method: self.method,
             initial_message: self.initial_message,
             metadata: self.metadata,

@@ -35,9 +35,10 @@ impl StreamingEvent {
     }
 
     pub fn from_ok_stream_close(metadata: MetadataMap) -> Self {
+        let status = Status::aborted("grpc streaming aborted".to_string());
         Self {
-            code: None,
-            err_msg: None,
+            code: Some(status.code()),
+            err_msg: Some(status.message().to_string()),
             metadata,
             body: None,
             is_stream_item: false,

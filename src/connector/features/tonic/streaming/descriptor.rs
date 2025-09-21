@@ -1,32 +1,7 @@
-use std::fmt;
-
 use crate::connector::features::shared::rate_limiter::RateLimitConfig;
 use crate::connector::{Kind, StreamDescriptor, Venue};
 use crate::utils::CorePickPolicy;
 use serde::Deserialize;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StreamingMode {
-    Server,
-    Client,
-    Bidi,
-}
-
-impl fmt::Display for StreamingMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let repr = match self {
-            StreamingMode::Server => "server",
-            StreamingMode::Client => "client",
-            StreamingMode::Bidi => "bidi",
-        };
-        f.write_str(repr)
-    }
-}
-
-const fn default_mode() -> StreamingMode {
-    StreamingMode::Server
-}
 
 const fn default_outbound_buffer() -> usize {
     64
@@ -34,8 +9,6 @@ const fn default_outbound_buffer() -> usize {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TonicStreamingDescriptor {
-    #[serde(default = "default_mode")]
-    mode: StreamingMode,
     /// Maximum number of hook calls at once.
     pub max_hook_calls_at_once: usize,
     /// Delay between async tasks.
@@ -59,23 +32,7 @@ pub struct TonicStreamingDescriptor {
 }
 
 impl TonicStreamingDescriptor {
-    fn with_mode(mode: StreamingMode) -> Self {
-        Self {
-            mode,
-            max_hook_calls_at_once: 10,
-            wait_async_tasks_us: 100,
-            max_pending_actions: None,
-            max_pending_events: None,
-            core_pick_policy: None,
-            rate_limits: Vec::new(),
-            max_decoding_message_size: None,
-            max_encoding_message_size: None,
-            outbound_buffer: default_outbound_buffer(),
-        }
-    }
-
     pub fn new(
-        mode: StreamingMode,
         max_hook_calls_at_once: Option<usize>,
         wait_async_tasks_us: Option<u64>,
         max_pending_actions: Option<usize>,
@@ -86,7 +43,7 @@ impl TonicStreamingDescriptor {
         max_encoding_message_size: Option<usize>,
         outbound_buffer: Option<usize>,
     ) -> Self {
-        let mut descriptor = Self::with_mode(mode);
+        let mut descriptor = Self::default();
         descriptor.max_hook_calls_at_once = max_hook_calls_at_once.filter(|&x| x > 0).unwrap_or(10);
         descriptor.wait_async_tasks_us = wait_async_tasks_us.unwrap_or(100);
         descriptor.max_pending_actions = max_pending_actions;
@@ -99,15 +56,15 @@ impl TonicStreamingDescriptor {
         descriptor
     }
 
-    pub fn low_latency(mode: StreamingMode) -> Self {
-        let mut descriptor = Self::with_mode(mode);
+    pub fn low_latency() -> Self {
+        let mut descriptor = Self::default();
         descriptor.max_hook_calls_at_once = 4;
         descriptor.wait_async_tasks_us = 0;
         descriptor
     }
 
-    pub fn high_throughput(mode: StreamingMode) -> Self {
-        let mut descriptor = Self::with_mode(mode);
+    pub fn high_throughput() -> Self {
+        let mut descriptor = Self::default();
         descriptor.max_hook_calls_at_once = 64;
         descriptor.wait_async_tasks_us = 200;
         descriptor
@@ -116,19 +73,21 @@ impl TonicStreamingDescriptor {
     pub fn add_rate_limit(&mut self, rl: RateLimitConfig) {
         self.rate_limits.push(rl);
     }
-
-    pub fn mode(&self) -> StreamingMode {
-        self.mode
-    }
-
-    pub fn set_mode(&mut self, mode: StreamingMode) {
-        self.mode = mode;
-    }
 }
 
 impl Default for TonicStreamingDescriptor {
     fn default() -> Self {
-        Self::with_mode(default_mode())
+        Self {
+            max_hook_calls_at_once: 10,
+            wait_async_tasks_us: 100,
+            max_pending_actions: None,
+            max_pending_events: None,
+            core_pick_policy: None,
+            rate_limits: Vec::new(),
+            max_decoding_message_size: None,
+            max_encoding_message_size: None,
+            outbound_buffer: default_outbound_buffer(),
+        }
     }
 }
 
@@ -138,11 +97,7 @@ impl StreamDescriptor for TonicStreamingDescriptor {
     }
 
     fn kind(&self) -> impl Kind {
-        match self.mode {
-            StreamingMode::Server => "tonic_streaming_server",
-            StreamingMode::Client => "tonic_streaming_client",
-            StreamingMode::Bidi => "tonic_streaming_bidi",
-        }
+        "tonic_streaming"
     }
 
     fn max_pending_actions(&self) -> Option<usize> {
