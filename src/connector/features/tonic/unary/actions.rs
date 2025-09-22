@@ -37,18 +37,17 @@ impl UnaryAction {
         } else {
             grpc.unary(request, self.method, RawCodec).await
         };
-
+        tracing::debug!("Unary response received: {:?}", resp);
         let resp = match resp {
             Ok(r) => r,
             Err(e) => return Err(e),
         };
 
-        tracing::debug!("Unary response received: {:?}", resp);
         let ev = UnaryEvent::from_ok_unary(resp);
 
         Ok(ev)
     }
-    
+
     pub fn new(method: &str, msg: Bytes) -> anyhow::Result<UnaryAction> {
         Ok(Self {
             method: method.try_into()?,

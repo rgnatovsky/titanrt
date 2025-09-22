@@ -153,7 +153,9 @@ mod tests {
         )
         .unwrap();
 
-        let jito_unary_descriptor = TonicUnaryDescriptor::high_throughput();
+        let mut jito_unary_descriptor = TonicUnaryDescriptor::high_throughput();
+        jito_unary_descriptor.max_decoding_message_size = Some(10 * 1024 * 1024);
+        jito_unary_descriptor.max_encoding_message_size = Some(10 * 1024 * 1024);
 
         let mut jito_unary_stream = tonic_conn
             .spawn_stream(jito_unary_descriptor, jito_unary_hook)

@@ -86,8 +86,7 @@ where
                 let cl_map = clients_map.clone();
                 let res_tx_ref = res_tx.clone();
                 let rl_mgr = action.rl_ctx().as_ref().map(|_| rl_manager.clone());
-                tracing::debug!("Received unary action: {:?}", action);
-                // спаунит асинхронную задачу на LocalSet.
+                
                 local.spawn_local(async move {
                     let (inner, conn_id, req_id, label, timeout, rl_ctx, rl_weight, json) =
                         action.into_parts();
@@ -108,7 +107,6 @@ where
                         return;
                     };
 
-                    tracing::debug!("Using channel: {:?}", channel);
                     
                     let stream_event = StreamEvent::builder(None)
                         .conn_id(conn_id)
@@ -136,7 +134,6 @@ where
                             }
                         }
                     }
-                    tracing::debug!("Sending unary request: {:?}", inner);
                     if let Err(e) = grpc.ready().await {
                         let inner_event = UnaryEvent::from_status(Status::unavailable(format!(
                             "[TonicStream - Runner] channel not ready with error: {e}"

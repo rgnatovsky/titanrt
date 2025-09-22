@@ -68,6 +68,7 @@ impl ClientInitializer<TonicChannelSpec> for TonicClient {
             endpoint = endpoint
                 .tls_config(
                     ClientTlsConfig::new()
+                        .with_enabled_roots()
                         .with_native_roots()
                         .domain_name(domain),
                 )
@@ -105,9 +106,7 @@ impl ClientInitializer<TonicChannelSpec> for TonicClient {
 
         let client = rt
             .block_on(async { endpoint.connect().await })
-            .map_err(|e| {
-                anyhow::anyhow!("[TonicClient] connect error: {e:#}")
-            })?;
+            .map_err(|e| anyhow::anyhow!("[TonicClient] connect error: {e:#}"))?;
 
         Ok(TonicClient(client))
     }
