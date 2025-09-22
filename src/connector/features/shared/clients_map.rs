@@ -65,7 +65,7 @@ impl<Client: ClientInitializer<Config>, Config: Clone> ClientsMap<Client, Config
             clients_map.insert(default_id, default_client);
         }
 
-        if config.fail_on_empty {
+        if config.fail_on_empty && clients_map.is_empty() {
             return Err(anyhow::anyhow!("Clients map is empty"));
         }
 
