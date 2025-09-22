@@ -11,17 +11,11 @@ use tonic::{
     transport::Channel,
 };
 
-/// Универсальное описание RPC-вызова (без конкретных protobuf-типов).
-#[derive(Debug, Clone)]
-pub struct UnaryMessage {
-    method: PathAndQuery,
-    message: Bytes,
-}
-
 #[derive(Debug, Clone)]
 pub struct UnaryAction {
-    pub msg: UnaryMessage, // какой тип вызова
-    pub meta: MetadataMap, // заголовки gRPC
+    pub method: PathAndQuery,
+    pub msg: Bytes,
+    pub meta: MetadataMap, 
 }
 
 impl UnaryAction {
@@ -30,19 +24,18 @@ impl UnaryAction {
         grpc: &mut Grpc<Channel>,
         timeout: Option<Duration>,
     ) -> Result<UnaryEvent, Status> {
-        let mut request = Request::new(self.msg.message);
+        let mut request = Request::new(self.msg);
 
         *request.metadata_mut() = self.meta;
 
         let resp = if let Some(t) = timeout {
-            let resp = match time::timeout(t, grpc.unary(request, self.msg.method, RawCodec)).await
-            {
+            let resp = match time::timeout(t, grpc.unary(request, self.method, RawCodec)).await {
                 Ok(r) => r,
                 Err(_) => return Err(Status::deadline_exceeded("client timeout")),
             };
             resp
         } else {
-            grpc.unary(request, self.msg.method, RawCodec).await
+            grpc.unary(request, self.method, RawCodec).await
         };
 
         let resp = match resp {
@@ -54,42 +47,18 @@ impl UnaryAction {
 
         Ok(ev)
     }
-    pub fn builder(call: UnaryMessage) -> UnaryActionBuilder {
-        UnaryActionBuilder::new(call)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct UnaryActionBuilder {
-    grpc: UnaryMessage,
-    metadata: MetadataMap,
-}
-
-impl UnaryActionBuilder {
-    pub fn new(call: UnaryMessage) -> Self {
+    pub fn new(method: impl Into<PathAndQuery>, msg: Bytes) -> UnaryAction {
         Self {
-            grpc: call,
-            metadata: MetadataMap::new(),
+            method: method.into(),
+            msg,
+            meta: MetadataMap::new(),
         }
     }
 
-    pub fn header_kv(mut self, k: &str, v: &str) -> Self {
+    pub fn header_kv(&mut self, k: &str, v: &str)  {
         if let (Ok(key), Ok(val)) = (k.parse::<AsciiMetadataKey>(), MetadataValue::try_from(v)) {
-            self.metadata.insert(key, val);
+            self.meta.insert(key, val);
         }
-        self
-    }
-    pub fn bearer(self, token: &str) -> Self {
-        self.header_kv("authorization", &format!("Bearer {}", token))
-    }
-    pub fn api_key_header(self, name: &str, value: &str) -> Self {
-        self.header_kv(name, value)
-    }
-
-    pub fn build(self) -> UnaryAction {
-        UnaryAction {
-            msg: self.grpc,
-            meta: self.metadata,
-        }
+      
     }
 }
