@@ -64,8 +64,9 @@ name = "runtime_hot_loop"
 harness = false
 
 [features]
-default = ["connector"]
+default = ["connector", "reqwest_conn", "tonic_conn"]
 connector = []
-reqwest_conn = ["reqwest", "serde_urlencoded"]
-tonic_conn = ["tonic", "prost", "prost-types"]
+reqwest_conn = ["reqwest", "serde_urlencoded", "shared"]
+tonic_conn = ["tonic", "prost", "prost-types", "shared"]
 nats_bridge = ["async-nats"]
+shared = []
