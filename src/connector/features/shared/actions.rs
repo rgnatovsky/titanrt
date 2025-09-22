@@ -21,9 +21,9 @@ pub struct StreamActionBuilder<Inner> {
     json: Option<Value>,
 }
 
-impl<Spec> StreamActionBuilder<Spec> {
+impl<Inner> StreamActionBuilder<Inner> {
     /// Create a builder from a spec
-    pub fn new(spec: Option<Spec>) -> Self {
+    pub fn new(spec: Option<Inner>) -> Self {
         Self {
             inner: spec,
             timeout: None,
@@ -97,14 +97,14 @@ impl<Spec> StreamActionBuilder<Spec> {
     }
 
     /// set inner action
-    pub fn inner(mut self, spec: Spec) -> Self {
-        self.inner = Some(spec);
+    pub fn inner(mut self, inner: Inner) -> Self {
+        self.inner = Some(inner);
         self
     }
 
     /// finalize build
-    pub fn build(self) -> anyhow::Result<StreamAction<Spec>> {
-        Ok(StreamAction {
+    pub fn build(self) -> StreamAction<Inner> {
+        StreamAction {
             inner: self.inner,
             conn_id: self.conn_id,
             req_id: self.req_id,
@@ -113,7 +113,7 @@ impl<Spec> StreamActionBuilder<Spec> {
             rl_ctx: self.rl_ctx,
             rl_weight: self.rl_weight,
             json: self.json,
-        })
+        }
     }
 }
 
@@ -132,10 +132,15 @@ pub struct StreamAction<Inner> {
 }
 
 impl<Inner> StreamAction<Inner> {
+    /// Create a builder
+    pub fn builder(inner: Option<Inner>) -> StreamActionBuilder<Inner> {
+        StreamActionBuilder::new(inner)
+    }
     /// Get a reference to the inner spec
     pub fn inner(&self) -> Option<&Inner> {
         self.inner.as_ref()
     }
+    /// Take the inner spec
     pub fn inner_take(&mut self) -> Option<Inner> {
         self.inner.take()
     }
