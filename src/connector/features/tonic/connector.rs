@@ -5,7 +5,7 @@ use crate::utils::{CancelToken, CoreStats};
 
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, sync::Arc};
-use tokio::runtime::Builder;
+use tokio::runtime::{Builder, Runtime};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TonicConnectorConfig {
@@ -20,7 +20,7 @@ pub struct TonicConnector {
     clients_map: ClientsMap<TonicClient, TonicChannelSpec>,
     cancel_token: CancelToken,
     core_stats: Option<Arc<CoreStats>>,
-    rt_tokio: tokio::runtime::Runtime,
+    rt_tokio: Arc<tokio::runtime::Runtime>,
 }
 
 impl TonicConnector {
@@ -28,8 +28,8 @@ impl TonicConnector {
         self.clients_map.clone()
     }
 
-    pub fn rt_tokio(&self) -> tokio::runtime::Handle {
-        self.rt_tokio.handle().clone()
+    pub fn rt_tokio(&self) -> Arc<Runtime> {
+        self.rt_tokio.clone()
     }
 }
 
@@ -64,7 +64,7 @@ impl BaseConnector for TonicConnector {
             clients_map,
             cancel_token,
             core_stats,
-            rt_tokio,
+            rt_tokio: Arc::new(rt_tokio),
         })
     }
 
@@ -93,22 +93,24 @@ mod tests {
 
     use crate::{
         connector::{
-            BaseConnector,
+            BaseConnector, HookArgs,
             features::{
-                shared::clients_map::SpecificClient,
+                shared::{clients_map::SpecificClient, events::StreamEvent},
                 tonic::{
                     client::TonicChannelSpec,
                     connector::{TonicConnector, TonicConnectorConfig},
+                    unary::{TonicUnaryDescriptor, UnaryEvent},
                 },
             },
         },
-        utils::CancelToken,
+        io::ringbuffer::RingSender,
+        utils::{CancelToken, NullReducer, NullState},
     };
 
     #[test]
     fn connector_init_test() {
         let cancel = CancelToken::new_root();
-        let _tonic_conn = TonicConnector::init(
+        let mut tonic_conn = TonicConnector::init(
             TonicConnectorConfig {
                 default_max_cores: Some(4),
                 specific_core_ids: vec![],
@@ -134,5 +136,26 @@ mod tests {
             None,
         )
         .unwrap();
+
+        let jito_unary_descriptor = TonicUnaryDescriptor::high_throughput();
+
+        let jito_unary_stream = tonic_conn
+            .spawn_stream(jito_unary_descriptor, jito_unary_hook)
+            .expect("spawn_stream failed");
+
+        std::thread::sleep(std::time::Duration::from_secs(10));
+        jito_unary_stream.cancel();
+    }
+
+    pub fn jito_unary_hook(
+        args: HookArgs<
+            StreamEvent<UnaryEvent>,
+            RingSender<()>,
+            NullReducer,
+            NullState,
+            TonicUnaryDescriptor,
+        >,
+    ) {
+        println!(" Receive event: {:?}", args.raw);
     }
 }

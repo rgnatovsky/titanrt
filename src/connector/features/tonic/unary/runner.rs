@@ -14,7 +14,9 @@ use crate::prelude::{BaseRx, TxPairExt};
 use crate::utils::{Reducer, StateMarker};
 
 use crossbeam::channel::unbounded;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::runtime::Runtime;
 use tokio::sync::Mutex;
 use tokio::task::LocalSet;
 use tokio::time::sleep;
@@ -35,10 +37,7 @@ where
     S: StateMarker,
     R: Reducer,
 {
-    type Config = (
-        ClientsMap<TonicClient, TonicChannelSpec>,
-        tokio::runtime::Handle,
-    );
+    type Config = (ClientsMap<TonicClient, TonicChannelSpec>, Arc<Runtime>);
     type ActionTx = RingSender<StreamAction<UnaryAction>>;
     type RawEvent = StreamEvent<UnaryEvent>;
     type HookResult = ();
@@ -49,10 +48,7 @@ where
 
     fn run<H>(
         mut ctx: RuntimeCtx<
-            (
-                ClientsMap<TonicClient, TonicChannelSpec>,
-                tokio::runtime::Handle,
-            ),
+            (ClientsMap<TonicClient, TonicChannelSpec>, Arc<Runtime>),
             TonicUnaryDescriptor,
             RingSender<StreamAction<UnaryAction>>,
             E,
