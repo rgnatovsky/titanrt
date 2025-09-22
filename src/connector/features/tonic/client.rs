@@ -88,3 +88,48 @@ impl ClientInitializer<TonicChannelSpec> for TonicClient {
         Ok(TonicClient(client))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::panic;
+    use tokio::runtime::Builder;
+
+    use crate::connector::features::shared::clients_map::ClientInitializer;
+
+    #[test]
+    fn tonicclient_init_panics_without_runtime() {
+        use crate::connector::features::shared::clients_map::SpecificClient;
+
+        let rt_tokio = Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .map_err(|e| anyhow::anyhow!("Tokio Runtime error: {e}"))
+            .unwrap();
+
+        let cfg = SpecificClient {
+            spec: super::TonicChannelSpec {
+                uri: "http://127.0.0.1:50051".to_string(),
+                connect_timeout_ms: None,
+                request_timeout_ms: None,
+                tcp_nodelay: None,
+                http2_keepalive_interval_ms: None,
+                http2_keepalive_timeout_ms: None,
+            },
+            ip: None,
+            id: 1,
+            // возможно другие поля — если есть, добавь их тут
+        };
+
+        let res = panic::catch_unwind(|| {
+            let _ = rt_tokio
+                .block_on(async { super::TonicClient::init(&cfg) })
+                .unwrap();
+        });
+
+        assert!(
+            res.is_err(),
+            "ожидалась паника при TonicClient::init() без runtime"
+        );
+    }
+}

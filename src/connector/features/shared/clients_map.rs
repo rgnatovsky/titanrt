@@ -28,7 +28,7 @@ where
 
 #[derive(Clone)]
 pub struct ClientsMap<Client: ClientInitializer<Spec>, Spec: Clone> {
-    inner: Arc<AHashMap<usize, Client>>,
+    pub(crate) inner: Arc<AHashMap<usize, Client>>,
     _spec: PhantomData<Spec>,
 }
 

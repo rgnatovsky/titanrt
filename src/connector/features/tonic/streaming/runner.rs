@@ -20,13 +20,11 @@ use crate::io::ringbuffer::RingSender;
 use crate::prelude::{BaseRx, TxPairExt};
 use crate::utils::{Reducer, StateMarker};
 
-use anyhow::anyhow;
 use crossbeam::channel::unbounded;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use std::time::Duration;
-use tokio::runtime::Builder;
 use tokio::sync::Mutex;
 use tokio::task::LocalSet;
 use tokio::time::sleep;
@@ -46,18 +44,24 @@ where
     S: StateMarker,
     R: Reducer,
 {
-    type Config = ClientsMap<TonicClient, TonicChannelSpec>;
+    type Config = (
+        ClientsMap<TonicClient, TonicChannelSpec>,
+        tokio::runtime::Handle,
+    );
     type ActionTx = RingSender<StreamAction<StreamingActionInner>>;
     type RawEvent = StreamEvent<StreamingEvent>;
     type HookResult = ();
 
     fn build_config(&mut self, _desc: &TonicStreamingDescriptor) -> anyhow::Result<Self::Config> {
-        Ok(self.clients_map())
+        Ok((self.clients_map(), self.rt_tokio()))
     }
 
     fn run<H>(
         mut ctx: RuntimeCtx<
-            ClientsMap<TonicClient, TonicChannelSpec>,
+            (
+                ClientsMap<TonicClient, TonicChannelSpec>,
+                tokio::runtime::Handle,
+            ),
             TonicStreamingDescriptor,
             RingSender<StreamAction<StreamingActionInner>>,
             E,
@@ -77,12 +81,6 @@ where
             ctx.desc.rate_limits.clone(),
         )));
 
-        let rt = Builder::new_current_thread()
-            .enable_io()
-            .enable_time()
-            .build()
-            .map_err(|e| StreamError::Unknown(anyhow!("Tokio Runtime error: {e}")))?;
-
         let local = LocalSet::new();
         let (res_tx, res_rx) = unbounded();
         let (lifecycle_tx, lifecycle_rx) = unbounded();
@@ -90,6 +88,8 @@ where
         let mut active_streams: HashMap<usize, ActiveStream> = HashMap::new();
 
         ctx.health.up();
+
+        let (clients_map, rt) = ctx.cfg;
 
         loop {
             if ctx.cancel.is_cancelled() {
@@ -139,7 +139,7 @@ where
                             prev.stop();
                         }
 
-                        let Some(client) = ctx.cfg.get(&conn_id) else {
+                        let Some(client) = clients_map.get(&conn_id) else {
                             emit_event(
                                 &res_tx,
                                 Some(conn_id),

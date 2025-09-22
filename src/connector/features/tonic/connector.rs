@@ -5,8 +5,7 @@ use crate::utils::{CancelToken, CoreStats};
 
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, sync::Arc};
-
-pub const DEFAULT_CONN_ID: u16 = u16::MAX;
+use tokio::runtime::Builder;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TonicConnectorConfig {
@@ -21,11 +20,16 @@ pub struct TonicConnector {
     clients_map: ClientsMap<TonicClient, TonicChannelSpec>,
     cancel_token: CancelToken,
     core_stats: Option<Arc<CoreStats>>,
+    rt_tokio: tokio::runtime::Runtime,
 }
 
 impl TonicConnector {
     pub fn clients_map(&self) -> ClientsMap<TonicClient, TonicChannelSpec> {
         self.clients_map.clone()
+    }
+
+    pub fn rt_tokio(&self) -> tokio::runtime::Handle {
+        self.rt_tokio.handle().clone()
     }
 }
 
@@ -47,13 +51,20 @@ impl BaseConnector for TonicConnector {
             None
         };
 
-        let clients_map = ClientsMap::new(&config.client)?;
+        let rt_tokio = Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()
+            .map_err(|e| anyhow::anyhow!("Tokio Runtime error: {e}"))?;
+
+        let clients_map = rt_tokio.block_on(async { ClientsMap::new(&config.client) })?;
 
         Ok(Self {
             config,
             clients_map,
             cancel_token,
             core_stats,
+            rt_tokio,
         })
     }
 
@@ -74,5 +85,54 @@ impl BaseConnector for TonicConnector {
 impl Display for TonicConnector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "TonicConnector")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::{
+        connector::{
+            BaseConnector,
+            features::{
+                shared::clients_map::SpecificClient,
+                tonic::{
+                    client::TonicChannelSpec,
+                    connector::{TonicConnector, TonicConnectorConfig},
+                },
+            },
+        },
+        utils::CancelToken,
+    };
+
+    #[test]
+    fn connector_init_test() {
+        let cancel = CancelToken::new_root();
+        let _tonic_conn = TonicConnector::init(
+            TonicConnectorConfig {
+                default_max_cores: Some(4),
+                specific_core_ids: vec![],
+                use_core_stats: true,
+                client: crate::connector::features::shared::clients_map::ClientConfig {
+                    default: None,
+                    specific: vec![SpecificClient {
+                        id: 0,
+                        ip: None,
+                        spec: TonicChannelSpec {
+                            uri: "https://ny.testnet.block-engine.jito.wtf".to_string(),
+                            connect_timeout_ms: Some(10000),
+                            request_timeout_ms: Some(10000),
+                            tcp_nodelay: Some(true),
+                            http2_keepalive_interval_ms: Some(10000),
+                            http2_keepalive_timeout_ms: Some(10000),
+                        },
+                    }],
+                    fail_on_empty: false,
+                },
+            },
+            cancel,
+            None,
+        )
+        .unwrap();
     }
 }
