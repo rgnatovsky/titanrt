@@ -3,6 +3,7 @@ use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use ahash::AHashMap;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use tokio::runtime::Runtime;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SpecificClient<Spec: Clone> {
@@ -23,7 +24,7 @@ pub trait ClientInitializer<Spec: Clone>
 where
     Self: Sized,
 {
-    fn init(spec: &SpecificClient<Spec>) -> Result<Self>;
+    fn init(spec: &SpecificClient<Spec>, rt: Option<Arc<Runtime>>) -> Result<Self>;
 }
 
 #[derive(Clone)]
@@ -33,7 +34,7 @@ pub struct ClientsMap<Client: ClientInitializer<Spec>, Spec: Clone> {
 }
 
 impl<Client: ClientInitializer<Config>, Config: Clone> ClientsMap<Client, Config> {
-    pub fn new(config: &ClientConfig<Config>) -> Result<Self> {
+    pub fn new(config: &ClientConfig<Config>, rt: Option<Arc<Runtime>>) -> Result<Self> {
         let mut clients_map = AHashMap::new();
 
         let mut id_seen: HashSet<usize> = HashSet::default();
@@ -48,7 +49,7 @@ impl<Client: ClientInitializer<Config>, Config: Clone> ClientsMap<Client, Config
                 continue;
             }
 
-            let client = Client::init(spec)?;
+            let client = Client::init(spec, rt.clone())?;
 
             clients_map.insert(spec.id, client);
         }
@@ -56,11 +57,14 @@ impl<Client: ClientInitializer<Config>, Config: Clone> ClientsMap<Client, Config
         if let Some(spec) = &config.default {
             let default_id = id_seen.len();
 
-            let default_client = Client::init(&SpecificClient {
-                id: default_id,
-                ip: None,
-                spec: spec.clone(),
-            })?;
+            let default_client = Client::init(
+                &SpecificClient {
+                    id: default_id,
+                    ip: None,
+                    spec: spec.clone(),
+                },
+                rt.clone(),
+            )?;
 
             clients_map.insert(default_id, default_client);
         }

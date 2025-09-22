@@ -45,7 +45,7 @@ impl BaseConnector for ReqwestConnector {
         } else {
             None
         };
-        let clients_map = ClientsMap::new(&config.client)?;
+        let clients_map = ClientsMap::new(&config.client, None)?;
 
         Ok(Self {
             config,

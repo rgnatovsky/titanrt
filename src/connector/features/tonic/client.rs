@@ -1,9 +1,10 @@
-use std::net::IpAddr;
 use std::str::FromStr;
 use std::time::Duration;
+use std::{net::IpAddr, sync::Arc};
 
 use anyhow::Result;
-use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
+use tokio::runtime::Runtime;
+use tonic::transport::{Channel, ClientTlsConfig, Endpoint, Uri};
 
 use serde::{Deserialize, Serialize};
 
@@ -39,8 +40,13 @@ impl TonicClient {
 
 /// Реализация ClientInitializer — синхронная инициализация Endpoint-а
 impl ClientInitializer<TonicChannelSpec> for TonicClient {
-    fn init(cfg: &SpecificClient<TonicChannelSpec>) -> Result<Self> {
-        // создаём endpoint
+    fn init(cfg: &SpecificClient<TonicChannelSpec>, rt: Option<Arc<Runtime>>) -> Result<Self> {
+        let rt = rt.ok_or_else(|| {
+            StreamError::Unknown(anyhow::anyhow!(
+                "[TonicClient] Tokio Runtime is required for TonicClient::init()"
+            ))
+        })?;
+
         let mut endpoint = Endpoint::from_shared(cfg.spec.uri.clone()).map_err(|e| {
             StreamError::Unknown(anyhow::anyhow!(
                 "[TonicClient] invalid uri '{}': {e}",
@@ -49,8 +55,22 @@ impl ClientInitializer<TonicChannelSpec> for TonicClient {
         })?;
 
         if cfg.spec.uri.starts_with("https://") {
+            let domain = Uri::try_from(&cfg.spec.uri)
+                .ok()
+                .and_then(|u| u.host().map(|s| s.to_string()))
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "[TonicClient] invalid https uri (no host): {}",
+                        cfg.spec.uri
+                    )
+                })?;
+
             endpoint = endpoint
-                .tls_config(ClientTlsConfig::new())
+                .tls_config(
+                    ClientTlsConfig::new()
+                        .with_native_roots()
+                        .domain_name(domain),
+                )
                 .map_err(|e| anyhow::anyhow!("tls config error: {e}"))?;
         }
 
@@ -83,7 +103,11 @@ impl ClientInitializer<TonicChannelSpec> for TonicClient {
             endpoint = endpoint.keep_alive_timeout(Duration::from_millis(ms));
         }
 
-        let client = endpoint.connect_lazy();
+        let client = rt
+            .block_on(async { endpoint.connect().await })
+            .map_err(|e| {
+                anyhow::anyhow!("[TonicClient] connect error: {e:#}")
+            })?;
 
         Ok(TonicClient(client))
     }
@@ -91,21 +115,25 @@ impl ClientInitializer<TonicChannelSpec> for TonicClient {
 
 #[cfg(test)]
 mod tests {
-    use std::panic;
+    use std::sync::Arc;
     use tokio::runtime::Builder;
 
-    use crate::connector::features::shared::clients_map::ClientInitializer;
+    use crate::connector::features::{
+        shared::clients_map::ClientInitializer, tonic::client::TonicClient,
+    };
 
     #[test]
     fn tonicclient_init_panics_without_runtime() {
         use crate::connector::features::shared::clients_map::SpecificClient;
 
-        let rt_tokio = Builder::new_current_thread()
-            .enable_io()
-            .enable_time()
-            .build()
-            .map_err(|e| anyhow::anyhow!("Tokio Runtime error: {e}"))
-            .unwrap();
+        let rt_tokio = Arc::new(
+            Builder::new_current_thread()
+                .enable_io()
+                .enable_time()
+                .build()
+                .map_err(|e| anyhow::anyhow!("Tokio Runtime error: {e}"))
+                .unwrap(),
+        );
 
         let cfg = SpecificClient {
             spec: super::TonicChannelSpec {
@@ -121,15 +149,6 @@ mod tests {
             // возможно другие поля — если есть, добавь их тут
         };
 
-        let res = panic::catch_unwind(|| {
-            let _ = rt_tokio
-                .block_on(async { super::TonicClient::init(&cfg) })
-                .unwrap();
-        });
-
-        assert!(
-            res.is_err(),
-            "ожидалась паника при TonicClient::init() без runtime"
-        );
+        TonicClient::init(&cfg, Some(rt_tokio.clone())).unwrap();
     }
 }

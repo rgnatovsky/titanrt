@@ -43,6 +43,7 @@ impl UnaryAction {
             Err(e) => return Err(e),
         };
 
+        tracing::debug!("Unary response received: {:?}", resp);
         let ev = UnaryEvent::from_ok_unary(resp);
 
         Ok(ev)

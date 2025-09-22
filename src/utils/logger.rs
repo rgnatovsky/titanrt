@@ -32,9 +32,7 @@ impl LoggerConfig {
         }
     }
 
-    pub fn init_logging(
-        &self,
-    ) -> anyhow::Result<Option<tracing_appender::non_blocking::WorkerGuard>> {
+    pub fn init(&self) -> anyhow::Result<Option<tracing_appender::non_blocking::WorkerGuard>> {
         let level = Level::from_str(&self.level).unwrap_or(Level::INFO);
 
         if let Some(dir_str) = self.file_dir.as_deref() {

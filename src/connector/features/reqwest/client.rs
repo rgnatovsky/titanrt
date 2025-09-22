@@ -1,7 +1,8 @@
-use std::{net::IpAddr, str::FromStr, time::Duration};
+use std::{net::IpAddr, str::FromStr, sync::Arc, time::Duration};
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use tokio::runtime::Runtime;
 
 use crate::connector::{
     errors::StreamError,
@@ -19,7 +20,10 @@ pub struct ReqwestClientSpec {
 pub struct ReqwestClient(pub Client);
 
 impl ClientInitializer<ReqwestClientSpec> for ReqwestClient {
-    fn init(cfg: &SpecificClient<ReqwestClientSpec>) -> anyhow::Result<Self> {
+    fn init(
+        cfg: &SpecificClient<ReqwestClientSpec>,
+        _rt: Option<Arc<Runtime>>,
+    ) -> anyhow::Result<Self> {
         let mut builder = reqwest::ClientBuilder::new()
             .pool_max_idle_per_host(cfg.spec.pool_max_idle_per_host)
             .pool_idle_timeout(Duration::from_secs(cfg.spec.pool_idle_timeout_sec))

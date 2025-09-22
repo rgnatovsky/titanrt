@@ -51,20 +51,22 @@ impl BaseConnector for TonicConnector {
             None
         };
 
-        let rt_tokio = Builder::new_current_thread()
-            .enable_io()
-            .enable_time()
-            .build()
-            .map_err(|e| anyhow::anyhow!("Tokio Runtime error: {e}"))?;
+        let rt_tokio = Arc::new(
+            Builder::new_current_thread()
+                .enable_io()
+                .enable_time()
+                .build()
+                .map_err(|e| anyhow::anyhow!("Tokio Runtime error: {e}"))?,
+        );
 
-        let clients_map = rt_tokio.block_on(async { ClientsMap::new(&config.client) })?;
+        let clients_map = ClientsMap::new(&config.client, Some(rt_tokio.clone()))?;
 
         Ok(Self {
             config,
             clients_map,
             cancel_token,
             core_stats,
-            rt_tokio: Arc::new(rt_tokio),
+            rt_tokio,
         })
     }
 
@@ -91,24 +93,38 @@ impl Display for TonicConnector {
 #[cfg(test)]
 mod tests {
 
+    use bytes::Bytes;
+    use prost::Message;
+
     use crate::{
         connector::{
             BaseConnector, HookArgs,
             features::{
-                shared::{clients_map::SpecificClient, events::StreamEvent},
+                shared::{actions::StreamAction, clients_map::SpecificClient, events::StreamEvent},
                 tonic::{
                     client::TonicChannelSpec,
                     connector::{TonicConnector, TonicConnectorConfig},
-                    unary::{TonicUnaryDescriptor, UnaryEvent},
+                    unary::{TonicUnaryDescriptor, UnaryAction, UnaryEvent},
                 },
             },
         },
         io::ringbuffer::RingSender,
-        utils::{CancelToken, NullReducer, NullState},
+        utils::{CancelToken, NullReducer, NullState, logger::LoggerConfig},
     };
+
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+    pub struct NextScheduledLeaderRequest {
+        /// Defaults to the currently connected region if no region provided.
+        #[prost(string, repeated, tag = "1")]
+        pub regions: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    }
 
     #[test]
     fn connector_init_test() {
+        let mut _logger = LoggerConfig::default();
+        _logger.level = "debug".to_string();
+        let _logger = _logger.init();
+
         let cancel = CancelToken::new_root();
         let mut tonic_conn = TonicConnector::init(
             TonicConnectorConfig {
@@ -121,7 +137,7 @@ mod tests {
                         id: 0,
                         ip: None,
                         spec: TonicChannelSpec {
-                            uri: "https://ny.testnet.block-engine.jito.wtf".to_string(),
+                            uri: "https://mainnet.block-engine.jito.wtf".to_string(),
                             connect_timeout_ms: Some(10000),
                             request_timeout_ms: Some(10000),
                             tcp_nodelay: Some(true),
@@ -139,9 +155,31 @@ mod tests {
 
         let jito_unary_descriptor = TonicUnaryDescriptor::high_throughput();
 
-        let jito_unary_stream = tonic_conn
+        let mut jito_unary_stream = tonic_conn
             .spawn_stream(jito_unary_descriptor, jito_unary_hook)
             .expect("spawn_stream failed");
+        let mut buf = vec![];
+
+        NextScheduledLeaderRequest {
+            regions: vec![],
+        }
+        .encode(&mut buf)
+        .unwrap();
+
+        let unary = UnaryAction::new(
+            "searcher.SearcherService/GetNextScheduledLeader",
+            Bytes::from(buf),
+        )
+        .expect("Block engine fee info request should be valid");
+
+        let action = StreamAction::builder(Some(unary)).conn_id(0).build();
+
+        match jito_unary_stream.try_send(action) {
+            Ok(_) => {
+                tracing::info!("Sent jito unary action");
+            }
+            Err(e) => tracing::info!("Failed to send jito unary action: {:?}", e),
+        }
 
         std::thread::sleep(std::time::Duration::from_secs(10));
         jito_unary_stream.cancel();
@@ -156,6 +194,6 @@ mod tests {
             TonicUnaryDescriptor,
         >,
     ) {
-        println!(" Receive event: {:?}", args.raw);
+        tracing::info!("Receive event: {:?}", args.raw);
     }
 }
