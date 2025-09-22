@@ -1,6 +1,6 @@
 [package]
 name = "titanrt"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 authors = ["Ruslan Gnatovsky <rgnatovsky@gmail.com>"]
 description = "Typed reactive runtime for real-time systems"
@@ -64,7 +64,7 @@ name = "runtime_hot_loop"
 harness = false
 
 [features]
-default = ["connector", "reqwest_conn", "tonic_conn"]
+default = ["connector"]
 connector = []
 reqwest_conn = ["tokio", "reqwest", "serde_urlencoded"]
 tonic_conn = ["tonic", "tokio", "prost", "prost-types"]
