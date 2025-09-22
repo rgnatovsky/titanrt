@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use bytes::Bytes;
 use tonic::{Code, Status, metadata::MetadataMap};
 
@@ -61,6 +62,14 @@ impl StreamingEvent {
 
     pub fn is_stream_item(&self) -> bool {
         self.is_stream_item
+    }
+
+    pub fn decode_as<T: prost::Message + Default>(&self) -> anyhow::Result<T> {
+        if let Some(ref b) = self.body {
+            T::decode(b.as_ref()).map_err(|e| anyhow!("Prost decode error: {e}"))
+        } else {
+            Err(anyhow!("No body to decode"))
+        }
     }
 }
 

@@ -6,7 +6,7 @@ use crate::connector::features::shared::rate_limiter::RateLimitManager;
 use crate::connector::features::tonic::client::{TonicChannelSpec, TonicClient};
 use crate::connector::features::tonic::connector::TonicConnector;
 use crate::connector::features::tonic::streaming::StreamingMode;
-use crate::connector::features::tonic::streaming::actions::StreamingActionInner;
+use crate::connector::features::tonic::streaming::actions::StreamingAction;
 use crate::connector::features::tonic::streaming::descriptor::TonicStreamingDescriptor;
 use crate::connector::features::tonic::streaming::event::StreamingEvent;
 use crate::connector::features::tonic::streaming::handle_bidi::start_bidi_stream;
@@ -47,7 +47,7 @@ where
     R: Reducer,
 {
     type Config = (ClientsMap<TonicClient, TonicChannelSpec>, Arc<Runtime>);
-    type ActionTx = RingSender<StreamAction<StreamingActionInner>>;
+    type ActionTx = RingSender<StreamAction<StreamingAction>>;
     type RawEvent = StreamEvent<StreamingEvent>;
     type HookResult = ();
 
@@ -59,7 +59,7 @@ where
         mut ctx: RuntimeCtx<
             (ClientsMap<TonicClient, TonicChannelSpec>, Arc<Runtime>),
             TonicStreamingDescriptor,
-            RingSender<StreamAction<StreamingActionInner>>,
+            RingSender<StreamAction<StreamingAction>>,
             E,
             R,
             S,
@@ -130,7 +130,7 @@ where
                 let payload = payload;
 
                 match inner {
-                    StreamingActionInner::Connect(connect) => {
+                    StreamingAction::Connect(connect) => {
                         if let Some(prev) = active_streams.remove(&conn_id) {
                             prev.stop();
                         }
@@ -228,7 +228,7 @@ where
                             }
                         }
                     }
-                    StreamingActionInner::Send(message) => {
+                    StreamingAction::Send(message) => {
                         let Some(active) = active_streams.get(&conn_id) else {
                             emit_event(
                                 &res_tx,
@@ -308,7 +308,7 @@ where
                             }
                         }
                     }
-                    StreamingActionInner::Finish => {
+                    StreamingAction::Finish => {
                         let Some(active) = active_streams.get_mut(&conn_id) else {
                             emit_event(
                                 &res_tx,
@@ -343,7 +343,7 @@ where
                             }
                         }
                     }
-                    StreamingActionInner::Disconnect => {
+                    StreamingAction::Disconnect => {
                         let Some(active) = active_streams.remove(&conn_id) else {
                             emit_event(
                                 &res_tx,

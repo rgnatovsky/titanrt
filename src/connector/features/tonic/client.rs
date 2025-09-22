@@ -8,27 +8,19 @@ use tonic::transport::{Channel, ClientTlsConfig, Endpoint, Uri};
 
 use serde::{Deserialize, Serialize};
 
-use crate::connector::{
-    errors::StreamError,
-    features::shared::clients_map::{ClientInitializer, SpecificClient},
-};
+use crate::connector::features::shared::clients_map::{ClientInitializer, SpecificClient};
 
-/// Спецификация конфигурации для tonic endpoint
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TonicChannelSpec {
-    /// URI сервера, например "http://127.0.0.1:50051"
     pub uri: String,
-    /// Таймаут на установку соединения (в миллисекундах)
     pub connect_timeout_ms: Option<u64>,
-    /// Общий таймаут на RPC (в миллисекундах)
     pub request_timeout_ms: Option<u64>,
-    /// Опционально: TCP_NODELAY (если хочешь и если Endpoint поддерживает)
     pub tcp_nodelay: Option<bool>,
     pub http2_keepalive_interval_ms: Option<u64>,
     pub http2_keepalive_timeout_ms: Option<u64>,
+    pub tls: bool,
 }
 
-/// Клиент-обёртка, хранит Endpoint и кэшированный Channel
 #[derive(Clone)]
 pub struct TonicClient(Channel);
 
@@ -38,71 +30,67 @@ impl TonicClient {
     }
 }
 
-/// Реализация ClientInitializer — синхронная инициализация Endpoint-а
 impl ClientInitializer<TonicChannelSpec> for TonicClient {
     fn init(cfg: &SpecificClient<TonicChannelSpec>, rt: Option<Arc<Runtime>>) -> Result<Self> {
-        let rt = rt.ok_or_else(|| {
-            StreamError::Unknown(anyhow::anyhow!(
-                "[TonicClient] Tokio Runtime is required for TonicClient::init()"
-            ))
-        })?;
+        let rt = rt.ok_or_else(|| anyhow::anyhow!("[TonicClient] Tokio Runtime is required"))?;
 
-        let mut endpoint = Endpoint::from_shared(cfg.spec.uri.clone()).map_err(|e| {
-            StreamError::Unknown(anyhow::anyhow!(
-                "[TonicClient] invalid uri '{}': {e}",
-                cfg.spec.uri
-            ))
-        })?;
+        let mut endpoint = Endpoint::from_shared(cfg.spec.uri.clone())
+            .map_err(|e| anyhow::anyhow!("[TonicClient] invalid uri '{}': {e}", cfg.spec.uri))?;
 
-        if cfg.spec.uri.starts_with("https://") {
-            let domain = Uri::try_from(&cfg.spec.uri)
-                .ok()
-                .and_then(|u| u.host().map(|s| s.to_string()))
-                .ok_or_else(|| {
+        if cfg.spec.tls {
+            let server_name = {
+                let uri = Uri::try_from(&cfg.spec.uri).map_err(|_| {
+                    anyhow::anyhow!("[TonicClient] invalid https uri: {}", cfg.spec.uri)
+                })?;
+                let host = uri.host().ok_or_else(|| {
                     anyhow::anyhow!(
                         "[TonicClient] invalid https uri (no host): {}",
                         cfg.spec.uri
                     )
                 })?;
 
+                let is_ip = host.parse::<IpAddr>().is_ok();
+
+                if is_ip {
+                    tracing::warn!(
+                        "[TonicClient] URI host is an IP address: '{host}'. TLS certificate validation may fail.",
+                    );
+                }
+
+                host.to_string()
+            };
+
+            let tls = ClientTlsConfig::new()
+                .with_native_roots()
+                .domain_name(server_name);
+
             endpoint = endpoint
-                .tls_config(
-                    ClientTlsConfig::new()
-                        .with_enabled_roots()
-                        .with_native_roots()
-                        .domain_name(domain),
-                )
-                .map_err(|e| anyhow::anyhow!("tls config error: {e}"))?;
+                .tls_config(tls)
+                .map_err(|e| anyhow::anyhow!("[TonicClient] tls config error: {e}"))?;
         }
 
         if let Some(ip_str) = cfg.ip.as_deref() {
-            let ip = IpAddr::from_str(ip_str).map_err(|e| {
-                StreamError::Unknown(anyhow::anyhow!("[TonicClient] IP parse error: {e}"))
-            })?;
+            let ip = IpAddr::from_str(ip_str)
+                .map_err(|e| anyhow::anyhow!("[TonicClient] IP parse error: {e}"))?;
             endpoint = endpoint.local_address(Some(ip));
         }
 
-        if let Some(ms) = cfg.spec.connect_timeout_ms {
-            endpoint = endpoint.connect_timeout(Duration::from_millis(ms));
-        } else {
-            endpoint = endpoint.connect_timeout(Duration::from_secs(5));
-        }
-        if let Some(ms) = cfg.spec.request_timeout_ms {
-            endpoint = endpoint.timeout(Duration::from_millis(ms));
-        } else {
-            endpoint = endpoint.timeout(Duration::from_secs(10));
-        }
-        if let Some(nodelay) = cfg.spec.tcp_nodelay {
-            endpoint = endpoint.tcp_nodelay(nodelay);
-        } else {
-            endpoint = endpoint.tcp_nodelay(true);
-        }
-        if let Some(ms) = cfg.spec.http2_keepalive_interval_ms {
-            endpoint = endpoint.http2_keep_alive_interval(Duration::from_millis(ms));
-        }
-        if let Some(ms) = cfg.spec.http2_keepalive_timeout_ms {
-            endpoint = endpoint.keep_alive_timeout(Duration::from_millis(ms));
-        }
+        endpoint = endpoint.connect_timeout(Duration::from_millis(
+            cfg.spec.connect_timeout_ms.unwrap_or(5000),
+        ));
+
+        endpoint = endpoint.http2_keep_alive_interval(Duration::from_millis(
+            cfg.spec.http2_keepalive_interval_ms.unwrap_or(30000),
+        ));
+
+        endpoint = endpoint.keep_alive_timeout(Duration::from_millis(
+            cfg.spec.http2_keepalive_timeout_ms.unwrap_or(20000),
+        ));
+
+        endpoint = endpoint.timeout(Duration::from_millis(
+            cfg.spec.request_timeout_ms.unwrap_or(10000),
+        ));
+        endpoint = endpoint.tcp_nodelay(cfg.spec.tcp_nodelay.unwrap_or(true));
 
         let client = rt
             .block_on(async { endpoint.connect().await })
@@ -142,10 +130,10 @@ mod tests {
                 tcp_nodelay: None,
                 http2_keepalive_interval_ms: None,
                 http2_keepalive_timeout_ms: None,
+                tls: false,
             },
             ip: None,
             id: 1,
-            // возможно другие поля — если есть, добавь их тут
         };
 
         TonicClient::init(&cfg, Some(rt_tokio.clone())).unwrap();

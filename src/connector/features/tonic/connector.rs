@@ -93,31 +93,22 @@ impl Display for TonicConnector {
 #[cfg(test)]
 mod tests {
 
-    use bytes::Bytes;
-    use prost::Message;
-
     use crate::{
         connector::{
             BaseConnector, HookArgs,
             features::{
-                shared::{actions::StreamAction, clients_map::SpecificClient, events::StreamEvent},
+                shared::{clients_map::SpecificClient, events::StreamEvent},
                 tonic::{
                     client::TonicChannelSpec,
                     connector::{TonicConnector, TonicConnectorConfig},
-                    unary::{TonicUnaryDescriptor, UnaryAction, UnaryEvent},
+                    grpcbin::{DummyMessage, dummy_message},
+                    unary::{GrpcMethod, TonicUnaryDescriptor, UnaryAction, UnaryEvent},
                 },
             },
         },
         io::ringbuffer::RingSender,
         utils::{CancelToken, NullReducer, NullState, logger::LoggerConfig},
     };
-
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-    pub struct NextScheduledLeaderRequest {
-        /// Defaults to the currently connected region if no region provided.
-        #[prost(string, repeated, tag = "1")]
-        pub regions: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    }
 
     #[test]
     fn connector_init_test() {
@@ -137,12 +128,13 @@ mod tests {
                         id: 0,
                         ip: None,
                         spec: TonicChannelSpec {
-                            uri: "https://mainnet.block-engine.jito.wtf".to_string(),
+                            uri: "https://grpcb.in:9001".to_string(),
                             connect_timeout_ms: Some(10000),
                             request_timeout_ms: Some(10000),
                             tcp_nodelay: Some(true),
                             http2_keepalive_interval_ms: Some(10000),
                             http2_keepalive_timeout_ms: Some(10000),
+                            tls: true,
                         },
                     }],
                     fail_on_empty: false,
@@ -157,37 +149,58 @@ mod tests {
         jito_unary_descriptor.max_decoding_message_size = Some(10 * 1024 * 1024);
         jito_unary_descriptor.max_encoding_message_size = Some(10 * 1024 * 1024);
 
-        let mut jito_unary_stream = tonic_conn
-            .spawn_stream(jito_unary_descriptor, jito_unary_hook)
-            .expect("spawn_stream failed");
-        let mut buf = vec![];
+        let mut grpc_unary_stream = tonic_conn
+            .spawn_stream(jito_unary_descriptor, test_unary_hook)
+            .expect("spawn grpc stream failed");
 
-        NextScheduledLeaderRequest {
-            regions: vec![],
-        }
-        .encode(&mut buf)
-        .unwrap();
+        let msg = DummyMessage {
+            f_string: "test".to_string(),
+            f_strings: vec!["test1".to_string(), "test2".to_string()],
+            f_int32: 42,
+            f_int32s: vec![1, 2, 3],
+            f_enum: dummy_message::Enum::Enum1 as i32,
+            f_enums: vec![dummy_message::Enum::Enum2 as i32],
+            f_sub: Some(dummy_message::Sub {
+                f_string: "sub_test".to_string(),
+            }),
+            f_subs: vec![dummy_message::Sub {
+                f_string: "sub_test1".to_string(),
+            }],
+            f_bool: true,
+            f_bools: vec![true, false, true],
+            f_int64: 123456789,
+            f_int64s: vec![987654321, 123456789],
+            f_bytes: vec![1, 2, 3, 4, 5],
+            f_bytess: vec![vec![10, 20, 30], vec![40, 50, 60]],
+            f_float: 0.5,
+            f_floats: vec![1.1, 2.2, 3.3],
+        };
 
-        let unary = UnaryAction::new(
-            "searcher.SearcherService/GetNextScheduledLeader",
-            Bytes::from(buf),
+        let action = UnaryAction::new(
+            GrpcMethod::Full {
+                pkg: "grpcbin",
+                service: "GRPCBin",
+                method: "DummyUnary",
+            },
+            msg,
         )
-        .expect("Block engine fee info request should be valid");
+        .to_builder()
+        .conn_id(0)
+        .build();
 
-        let action = StreamAction::builder(Some(unary)).conn_id(0).build();
-
-        match jito_unary_stream.try_send(action) {
+        match grpc_unary_stream.try_send(action) {
             Ok(_) => {
-                tracing::info!("Sent jito unary action");
+                tracing::info!("Sent unary action");
             }
-            Err(e) => tracing::info!("Failed to send jito unary action: {:?}", e),
+            Err(e) => tracing::info!("Failed to send unary action: {:?}", e),
         }
 
-        std::thread::sleep(std::time::Duration::from_secs(10));
-        jito_unary_stream.cancel();
+        std::thread::sleep(std::time::Duration::from_secs(5));
+
+        grpc_unary_stream.cancel();
     }
 
-    pub fn jito_unary_hook(
+    pub fn test_unary_hook(
         args: HookArgs<
             StreamEvent<UnaryEvent>,
             RingSender<()>,
@@ -196,6 +209,10 @@ mod tests {
             TonicUnaryDescriptor,
         >,
     ) {
-        tracing::info!("Receive event: {:?}", args.raw);
+        if let Ok(m) = args.raw.inner().decode_as::<DummyMessage>() {
+            tracing::info!("Received message: {:?}", m);
+        } else {
+            tracing::info!("Failed to decode message");
+        }
     }
 }

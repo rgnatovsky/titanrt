@@ -1,9 +1,13 @@
 use std::fmt;
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
+use prost::Message;
 use serde::Deserialize;
 use tonic::codegen::http::uri::PathAndQuery;
 use tonic::metadata::{AsciiMetadataKey, MetadataMap, MetadataValue};
+
+use crate::connector::features::shared::actions::StreamActionBuilder;
+use crate::connector::features::tonic::unary::GrpcMethod;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -12,7 +16,6 @@ pub enum StreamingMode {
     Client,
     Bidi,
 }
-
 
 impl fmt::Display for StreamingMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -27,7 +30,7 @@ impl fmt::Display for StreamingMode {
 
 /// Control plane instructions for a persistent tonic streaming session.
 #[derive(Debug, Clone)]
-pub enum StreamingActionInner {
+pub enum StreamingAction {
     /// Establish (or re-establish) the gRPC stream.
     Connect(ConnectConfig),
     /// Push a payload into an active client/bidirectional stream.
@@ -46,21 +49,31 @@ pub struct ConnectConfig {
     pub metadata: MetadataMap,
 }
 
-impl StreamingActionInner {
-    pub fn connect(method: &str, mode: StreamingMode) -> StreamingConnectBuilder {
+impl StreamingAction {
+    pub fn connect(method: GrpcMethod, mode: StreamingMode) -> StreamingConnectBuilder {
         StreamingConnectBuilder::new(method, mode)
     }
 
-    pub fn send(message: Bytes) -> Self {
-        StreamingActionInner::Send(message)
+    pub fn send_encoded(message: Bytes) -> Self {
+        StreamingAction::Send(message)
+    }
+
+    pub fn send<T: Message>(message: T) -> Self {
+        let mut buf = BytesMut::with_capacity(message.encoded_len());
+        message.encode(&mut buf).unwrap();
+        StreamingAction::Send(buf.freeze())
     }
 
     pub fn finish() -> Self {
-        StreamingActionInner::Finish
+        StreamingAction::Finish
     }
 
     pub fn disconnect() -> Self {
-        StreamingActionInner::Disconnect
+        StreamingAction::Disconnect
+    }
+
+    pub fn to_builder(self) -> StreamActionBuilder<StreamingAction> {
+        StreamActionBuilder::new(Some(self))
     }
 }
 
@@ -73,23 +86,23 @@ pub struct StreamingConnectBuilder {
 }
 
 impl StreamingConnectBuilder {
-    fn new(method: &str, mode: StreamingMode) -> Self {
+    fn new(method: GrpcMethod, mode: StreamingMode) -> Self {
         Self {
             mode,
-            method: method
-                .parse()
-                .expect("invalid gRPC method path for streaming connect"),
+            method: method.parse(),
             initial_message: None,
             metadata: MetadataMap::new(),
         }
     }
 
     /// Set the initial subscription payload sent when the stream is opened.
-    pub fn subscription<B>(mut self, payload: B) -> Self
+    pub fn subscription<T>(mut self, payload: T) -> Self
     where
-        B: Into<Bytes>,
+        T: Message,
     {
-        self.initial_message = Some(payload.into());
+        let mut buf = BytesMut::with_capacity(payload.encoded_len());
+        payload.encode(&mut buf).unwrap();
+        self.initial_message = Some(buf.freeze());
         self
     }
 
@@ -111,8 +124,8 @@ impl StreamingConnectBuilder {
         self.header_kv(name, value)
     }
 
-    pub fn build(self) -> StreamingActionInner {
-        StreamingActionInner::Connect(ConnectConfig {
+    pub fn build(self) -> StreamingAction {
+        StreamingAction::Connect(ConnectConfig {
             mode: self.mode,
             method: self.method,
             initial_message: self.initial_message,
