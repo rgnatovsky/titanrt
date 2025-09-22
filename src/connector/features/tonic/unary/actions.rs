@@ -15,7 +15,7 @@ use tonic::{
 pub struct UnaryAction {
     pub method: PathAndQuery,
     pub msg: Bytes,
-    pub meta: MetadataMap, 
+    pub meta: MetadataMap,
 }
 
 impl UnaryAction {
@@ -47,18 +47,18 @@ impl UnaryAction {
 
         Ok(ev)
     }
-    pub fn new(method: impl Into<PathAndQuery>, msg: Bytes) -> UnaryAction {
-        Self {
-            method: method.into(),
+    
+    pub fn new(method: &str, msg: Bytes) -> anyhow::Result<UnaryAction> {
+        Ok(Self {
+            method: method.try_into()?,
             msg,
             meta: MetadataMap::new(),
-        }
+        })
     }
 
-    pub fn header_kv(&mut self, k: &str, v: &str)  {
+    pub fn header_kv(&mut self, k: &str, v: &str) {
         if let (Ok(key), Ok(val)) = (k.parse::<AsciiMetadataKey>(), MetadataValue::try_from(v)) {
             self.meta.insert(key, val);
         }
-      
     }
 }
