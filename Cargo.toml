@@ -39,7 +39,7 @@ tokio = { version = "1.47.1", features = [
     "signal",
     "sync",
     "rt-multi-thread",
-], optional = true }
+] }
 tracing-subscriber = "0.3.20"
 tracing-appender = "0.2"
 serde_urlencoded = { version = "0.7.1", optional = true }
@@ -66,6 +66,6 @@ harness = false
 [features]
 default = ["connector"]
 connector = []
-reqwest_conn = ["tokio", "reqwest", "serde_urlencoded"]
-tonic_conn = ["tonic", "tokio", "prost", "prost-types"]
-nats_bridge = ["tokio", "async-nats"]
+reqwest_conn = ["reqwest", "serde_urlencoded"]
+tonic_conn = ["tonic", "prost", "prost-types"]
+nats_bridge = ["async-nats"]
