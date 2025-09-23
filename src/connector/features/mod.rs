@@ -4,3 +4,5 @@ pub mod reqwest;
 pub mod shared;
 #[cfg(feature = "tonic_conn")]
 pub mod tonic;
+#[cfg(feature = "websocket")]
+pub mod websocket;
