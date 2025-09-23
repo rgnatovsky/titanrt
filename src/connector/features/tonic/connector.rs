@@ -192,7 +192,7 @@ mod tests {
             StreamingMode::Bidi,
         )
         .subscription(req)
-        .header_kv("x-token", "d50e525702b3a52420bcc432cc4bdd91")
+        .header_kv("x-token", "--token-value--")
         .build()
         .to_builder()
         .conn_id(conn_id)
