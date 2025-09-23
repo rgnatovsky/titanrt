@@ -93,6 +93,8 @@ impl Display for TonicConnector {
 #[cfg(test)]
 mod tests {
 
+    use tracing_appender::non_blocking::WorkerGuard;
+
     use crate::{
         connector::{
             BaseConnector, HookArgs,
@@ -101,7 +103,13 @@ mod tests {
                 tonic::{
                     client::TonicChannelSpec,
                     connector::{TonicConnector, TonicConnectorConfig},
-                    grpcbin::{DummyMessage, dummy_message},
+                    grpcbin::{
+                        DummyMessage, SubscribeRequest, SubscribeRequestFilterBlocks,
+                        SubscribeRequestFilterSlots, dummy_message,
+                    },
+                    streaming::{
+                        StreamingAction, StreamingEvent, StreamingMode, TonicStreamingDescriptor,
+                    },
                     unary::{GrpcMethod, TonicUnaryDescriptor, UnaryAction, UnaryEvent},
                 },
             },
@@ -110,14 +118,15 @@ mod tests {
         utils::{CancelToken, NullReducer, NullState, logger::LoggerConfig},
     };
 
-    #[test]
-    fn connector_init_test() {
-        let mut _logger = LoggerConfig::default();
-        _logger.level = "debug".to_string();
-        let _logger = _logger.init();
+    fn logging_init(level: &str) -> Option<WorkerGuard> {
+        let mut logger = LoggerConfig::default();
+        logger.level = level.to_string();
+        logger.init().unwrap()
+    }
 
+    fn tonic_conn_init(uri: &str, tls: bool, conn_id: usize) -> TonicConnector {
         let cancel = CancelToken::new_root();
-        let mut tonic_conn = TonicConnector::init(
+        TonicConnector::init(
             TonicConnectorConfig {
                 default_max_cores: Some(4),
                 specific_core_ids: vec![],
@@ -125,16 +134,16 @@ mod tests {
                 client: crate::connector::features::shared::clients_map::ClientConfig {
                     default: None,
                     specific: vec![SpecificClient {
-                        id: 0,
+                        id: conn_id,
                         ip: None,
                         spec: TonicChannelSpec {
-                            uri: "https://grpcb.in:9001".to_string(),
+                            uri: uri.to_string(),
                             connect_timeout_ms: Some(10000),
                             request_timeout_ms: Some(10000),
                             tcp_nodelay: Some(true),
                             http2_keepalive_interval_ms: Some(10000),
                             http2_keepalive_timeout_ms: Some(10000),
-                            tls: true,
+                            tls: tls,
                         },
                     }],
                     fail_on_empty: false,
@@ -143,7 +152,100 @@ mod tests {
             cancel,
             None,
         )
-        .unwrap();
+        .unwrap()
+    }
+
+    #[test]
+    fn test_grpc_streaming() {
+        let _logger = logging_init("debug");
+
+        let conn_id = 0;
+
+        let mut tonic_conn = tonic_conn_init(
+            "https://yellowstone-solana-mainnet.core.chainstack.com",
+            true,
+            conn_id,
+        );
+
+        let streaming_descriptor = TonicStreamingDescriptor::high_throughput();
+        
+        let mut geyser_stream = tonic_conn
+            .spawn_stream(streaming_descriptor, streaming_geyser_hook)
+            .unwrap();
+
+        let mut req = SubscribeRequest::default();
+
+        req.slots.insert(
+            "slots-main".into(),
+            SubscribeRequestFilterSlots {
+                filter_by_commitment: Some(true),
+                interslot_updates: Some(false),
+            },
+        );
+
+        let connection = StreamingAction::connect(
+            GrpcMethod::Full {
+                pkg: "geyser",
+                service: "Geyser",
+                method: "Subscribe",
+            },
+            StreamingMode::Bidi,
+        )
+        .subscription(req)
+        .header_kv("x-token", "d50e525702b3a52420bcc432cc4bdd91")
+        .build()
+        .to_builder()
+        .conn_id(conn_id)
+        .build();
+
+        geyser_stream.try_send(connection).unwrap();
+
+        std::thread::sleep(std::time::Duration::from_secs(5));
+
+        let mut req = SubscribeRequest::default();
+
+        req.blocks.insert(
+            "blocks".into(),
+            SubscribeRequestFilterBlocks {
+                account_include: vec!["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P".to_string()],
+                include_transactions: Some(true),
+                include_accounts: Some(false),
+                include_entries: Some(false),
+            },
+        );
+
+        geyser_stream
+            .try_send(
+                StreamingAction::send(req)
+                    .to_builder()
+                    .conn_id(conn_id)
+                    .build(),
+            )
+            .unwrap();
+
+        std::thread::sleep(std::time::Duration::from_secs(5));
+
+        geyser_stream.cancel();
+    }
+
+    pub fn streaming_geyser_hook(
+        args: HookArgs<
+            StreamEvent<StreamingEvent>,
+            RingSender<()>,
+            NullReducer,
+            NullState,
+            TonicStreamingDescriptor,
+        >,
+    ) {
+        tracing::debug!("Geyser hook: event={:?}", args.raw);
+    }
+
+    #[test]
+    fn test_unary_stream() {
+        return;
+        let _logger = logging_init("debug");
+        let conn_id = 0;
+        let mut tonic_conn = tonic_conn_init("https://grpcb.in:9001", true, conn_id);
 
         let mut jito_unary_descriptor = TonicUnaryDescriptor::high_throughput();
         jito_unary_descriptor.max_decoding_message_size = Some(10 * 1024 * 1024);
@@ -185,7 +287,7 @@ mod tests {
             msg,
         )
         .to_builder()
-        .conn_id(0)
+        .conn_id(conn_id)
         .build();
 
         match grpc_unary_stream.try_send(action) {

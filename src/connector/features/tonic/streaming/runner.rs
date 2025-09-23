@@ -150,6 +150,7 @@ where
                         };
 
                         let channel = client.channel();
+                        
                         let context = StreamContext {
                             req_id,
                             label: label.clone(),
