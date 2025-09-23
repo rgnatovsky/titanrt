@@ -1,6 +1,6 @@
 [package]
 name = "titanrt"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 authors = ["Ruslan Gnatovsky <rgnatovsky@gmail.com>"]
 description = "Typed reactive runtime for real-time systems"
