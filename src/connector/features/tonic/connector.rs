@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn test_unary_stream() {
-        return;
+    
         let _logger = logging_init("debug");
         let conn_id = 0;
         let mut tonic_conn = tonic_conn_init("https://grpcb.in:9001", true, conn_id);

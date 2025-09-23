@@ -7,7 +7,7 @@ use crate::connector::features::shared::events::StreamEventInner;
 /// Внутреннее представление gRPC-ивента, теперь совместимо с StreamEventInner.
 #[derive(Debug, Clone)]
 pub struct UnaryEvent {
-    code: Option<Code>,
+    code: Code,
     err_msg: Option<String>,
     pub metadata: MetadataMap,
     body: Option<Bytes>,
@@ -17,7 +17,7 @@ impl UnaryEvent {
     pub(crate) fn from_ok_unary(resp: tonic::Response<Bytes>) -> Self {
         let (metadata, body, _trailing) = resp.into_parts();
         Self {
-            code: None,
+            code: Code::Ok,
             err_msg: None,
             metadata,
             body: Some(body),
@@ -26,7 +26,7 @@ impl UnaryEvent {
 
     pub(crate) fn from_status(st: Status) -> Self {
         Self {
-            code: Some(st.code()),
+            code: st.code(),
             err_msg: Some(st.message().to_string()),
             metadata: MetadataMap::new(),
             body: None,
@@ -48,11 +48,11 @@ impl StreamEventInner for UnaryEvent {
     type Code = Code;
 
     fn status(&self) -> Option<&Self::Code> {
-        self.code.as_ref()
+        Some(&self.code)
     }
 
     fn is_ok(&self) -> bool {
-        self.code.is_none()
+        self.code == Code::Ok
     }
 
     fn error(&self) -> Option<&Self::Err> {

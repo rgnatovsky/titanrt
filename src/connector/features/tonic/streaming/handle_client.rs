@@ -1,8 +1,8 @@
 use crate::connector::features::shared::events::StreamEvent;
 use crate::connector::features::shared::rate_limiter::RateLimitManager;
+use crate::connector::features::tonic::codec::RawCodec;
 use crate::connector::features::tonic::streaming::StreamingMode;
 use crate::connector::features::tonic::streaming::actions::ConnectConfig;
-use crate::connector::features::tonic::codec::RawCodec;
 use crate::connector::features::tonic::streaming::event::StreamingEvent;
 use crate::connector::features::tonic::streaming::utils::{
     ActiveStream, MpscBytesStream, StreamContext, StreamLifecycle, emit_event,
@@ -10,6 +10,7 @@ use crate::connector::features::tonic::streaming::utils::{
 
 use bytes::Bytes;
 use crossbeam::channel::Sender;
+use std::borrow::Cow;
 use std::rc::Rc;
 use std::time::Duration;
 use tokio::sync::{Mutex, mpsc};
@@ -21,6 +22,7 @@ use tonic::{Request, Status};
 pub fn start_client_stream(
     connect: ConnectConfig,
     conn_id: usize,
+    label: Option<Cow<'static, str>>,
     context: StreamContext,
     channel: Channel,
     res_tx: Sender<StreamEvent<StreamingEvent>>,
@@ -33,7 +35,7 @@ pub fn start_client_stream(
     max_enc_size: Option<usize>,
     outbound_buffer: usize,
     local: &LocalSet,
-) -> Result<ActiveStream, Status> {
+) -> ActiveStream {
     let ConnectConfig {
         mode: _,
         method,
@@ -45,17 +47,16 @@ pub fn start_client_stream(
     let (tx, rx) = mpsc::channel::<Bytes>(buffer);
 
     if let Some(initial) = initial_message {
-        tx.try_send(initial).map_err(|e| {
-            Status::resource_exhausted(format!("initial message buffered send failed: {e}"))
-        })?;
+        tx.try_send(initial).unwrap()
     }
 
     let handle = local.spawn_local(async move {
         let StreamContext {
             req_id,
-            label,
+            name: stream_name,
             payload,
         } = context;
+
         let mut grpc = Grpc::new(channel);
 
         if let Some(size) = max_dec_size {
@@ -81,13 +82,13 @@ pub fn start_client_stream(
                 &res_tx,
                 Some(conn_id),
                 req_id,
-                label.as_ref(),
+                label,
                 payload.as_ref(),
                 StreamingEvent::from_status(Status::unavailable(format!(
                     "[TonicStream - Runner] channel not ready with error: {e}",
                 ))),
             );
-            let _ = lifecycle_tx.send(StreamLifecycle::Closed { conn_id });
+            let _ = lifecycle_tx.send(StreamLifecycle::Closed { stream_name });
             return;
         }
 
@@ -104,11 +105,11 @@ pub fn start_client_stream(
                         &res_tx,
                         Some(conn_id),
                         req_id,
-                        label.as_ref(),
+                        label,
                         payload.as_ref(),
                         StreamingEvent::from_status(Status::deadline_exceeded("connect timeout")),
                     );
-                    let _ = lifecycle_tx.send(StreamLifecycle::Closed { conn_id });
+                    let _ = lifecycle_tx.send(StreamLifecycle::Closed { stream_name });
                     return;
                 }
             },
@@ -121,7 +122,7 @@ pub fn start_client_stream(
                     &res_tx,
                     Some(conn_id),
                     req_id,
-                    label.as_ref(),
+                    label,
                     payload.as_ref(),
                     StreamingEvent::from_ok_unary(resp),
                 );
@@ -131,19 +132,19 @@ pub fn start_client_stream(
                     &res_tx,
                     Some(conn_id),
                     req_id,
-                    label.as_ref(),
+                    label,
                     payload.as_ref(),
                     StreamingEvent::from_status(status),
                 );
             }
         }
 
-        let _ = lifecycle_tx.send(StreamLifecycle::Closed { conn_id });
+        let _ = lifecycle_tx.send(StreamLifecycle::Closed { stream_name });
     });
 
-    Ok(ActiveStream {
+    ActiveStream {
         mode: StreamingMode::Client,
         sender: Some(tx),
         handle,
-    })
+    }
 }
