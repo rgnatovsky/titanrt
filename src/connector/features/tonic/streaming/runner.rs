@@ -81,7 +81,7 @@ where
         let (res_tx, res_rx) = unbounded();
         let (lifecycle_tx, lifecycle_rx) = unbounded();
 
-        let mut active_streams: HashMap<usize, ActiveStream> = HashMap::new();
+        let mut active_streams: HashMap<String, ActiveStream> = HashMap::new();
 
         ctx.health.up();
 
@@ -96,63 +96,71 @@ where
                 break Err(StreamError::Cancelled);
             }
 
-            while let Ok(StreamLifecycle::Closed { conn_id }) = lifecycle_rx.try_recv() {
-                active_streams.remove(&conn_id);
+            while let Ok(StreamLifecycle::Closed { stream_name }) = lifecycle_rx.try_recv() {
+                active_streams.remove(&stream_name);
             }
 
             while let Ok(action) = ctx.action_rx.try_recv() {
-                let (inner, conn_id, req_id, label, timeout, rl_ctx, rl_weight, payload) =
-                    action.into_parts();
+                let (
+                    maybe_inner,
+                    maybe_conn_id,
+                    req_id,
+                    label,
+                    timeout,
+                    rl_ctx,
+                    rl_weight,
+                    payload,
+                ) = action.into_parts();
 
-                let inner = match inner {
+                let inner = match maybe_inner {
                     Some(inner) => inner,
-                    None => continue,
-                };
-
-                let conn_id = match conn_id {
-                    Some(id) => id,
                     None => {
                         emit_event(
                             &res_tx,
-                            None,
+                            maybe_conn_id,
                             req_id,
-                            None,
+                            label,
                             payload.as_ref(),
                             StreamingEvent::from_status(Status::invalid_argument(
-                                "stream action missing conn_id",
+                                "stream action missing inner action",
                             )),
                         );
                         continue;
                     }
                 };
 
-                let label = label.map(|cow| cow.into_owned());
-                let payload = payload;
+                let stream_name = label
+                    .clone()
+                    .map(|cow| cow.into_owned())
+                    .unwrap_or_default();
 
                 match inner {
                     StreamingAction::Connect(connect) => {
-                        if let Some(prev) = active_streams.remove(&conn_id) {
-                            prev.stop();
-                        }
+                        let conn_id = maybe_conn_id.unwrap_or(clients_map.len());
 
                         let Some(client) = clients_map.get(&conn_id) else {
                             emit_event(
                                 &res_tx,
                                 Some(conn_id),
                                 req_id,
-                                label.as_ref(),
+                                label,
                                 payload.as_ref(),
                                 StreamingEvent::from_status(Status::unavailable(
-                                    "unknown tonic connection id",
+                                    "cannot find tonic client by connection id provided",
                                 )),
                             );
                             continue;
                         };
 
+                        if let Some(prev) = active_streams.remove(&stream_name) {
+                            prev.stop();
+                        }
+
                         let channel = client.channel();
+
                         let context = StreamContext {
                             req_id,
-                            label: label.clone(),
+                            name: stream_name.clone(),
                             payload: payload.clone(),
                         };
 
@@ -162,10 +170,11 @@ where
                             None
                         };
 
-                        let result = match connect.mode {
+                        let active = match connect.mode {
                             StreamingMode::Server => start_server_stream(
                                 connect,
                                 conn_id,
+                                label.clone(),
                                 context,
                                 channel,
                                 res_tx.clone(),
@@ -181,6 +190,7 @@ where
                             StreamingMode::Client => start_client_stream(
                                 connect,
                                 conn_id,
+                                label.clone(),
                                 context,
                                 channel,
                                 res_tx.clone(),
@@ -197,6 +207,7 @@ where
                             StreamingMode::Bidi => start_bidi_stream(
                                 connect,
                                 conn_id,
+                                label.clone(),
                                 context,
                                 channel,
                                 res_tx.clone(),
@@ -212,29 +223,24 @@ where
                             ),
                         };
 
-                        match result {
-                            Ok(active) => {
-                                active_streams.insert(conn_id, active);
-                            }
-                            Err(status) => {
-                                emit_event(
-                                    &res_tx,
-                                    Some(conn_id),
-                                    req_id,
-                                    label.as_ref(),
-                                    payload.as_ref(),
-                                    StreamingEvent::from_status(status),
-                                );
-                            }
-                        }
+                        active_streams.insert(stream_name, active);
+
+                        emit_event(
+                            &res_tx,
+                            maybe_conn_id,
+                            req_id,
+                            label,
+                            payload.as_ref(),
+                            StreamingEvent::from_ok(),
+                        );
                     }
                     StreamingAction::Send(message) => {
-                        let Some(active) = active_streams.get(&conn_id) else {
+                        let Some(active) = active_streams.get(&stream_name) else {
                             emit_event(
                                 &res_tx,
-                                Some(conn_id),
+                                maybe_conn_id,
                                 req_id,
-                                label.as_ref(),
+                                label,
                                 payload.as_ref(),
                                 StreamingEvent::from_status(Status::failed_precondition(
                                     "stream is not connected",
@@ -247,9 +253,9 @@ where
                             StreamingMode::Server => {
                                 emit_event(
                                     &res_tx,
-                                    Some(conn_id),
+                                    maybe_conn_id,
                                     req_id,
-                                    label.as_ref(),
+                                    label,
                                     payload.as_ref(),
                                     StreamingEvent::from_status(Status::failed_precondition(
                                         "cannot send payload to server-streaming session",
@@ -260,9 +266,9 @@ where
                                 let Some(sender) = active.sender.clone() else {
                                     emit_event(
                                         &res_tx,
-                                        Some(conn_id),
+                                        maybe_conn_id,
                                         req_id,
-                                        label.as_ref(),
+                                        label,
                                         payload.as_ref(),
                                         StreamingEvent::from_status(Status::failed_precondition(
                                             "stream writer not available",
@@ -295,9 +301,9 @@ where
                                     if let Err(err) = sender.send(message).await {
                                         emit_event(
                                             &res_tx_ref,
-                                            Some(conn_id),
+                                            maybe_conn_id,
                                             req_id,
-                                            label.as_ref(),
+                                            label,
                                             payload.as_ref(),
                                             StreamingEvent::from_status(Status::unavailable(
                                                 format!("streaming message send failed: {}", err),
@@ -309,12 +315,12 @@ where
                         }
                     }
                     StreamingAction::Finish => {
-                        let Some(active) = active_streams.get_mut(&conn_id) else {
+                        let Some(active) = active_streams.get_mut(&stream_name) else {
                             emit_event(
                                 &res_tx,
-                                Some(conn_id),
+                                maybe_conn_id,
                                 req_id,
-                                label.as_ref(),
+                                label,
                                 payload.as_ref(),
                                 StreamingEvent::from_status(Status::failed_precondition(
                                     "stream is not connected",
@@ -332,9 +338,9 @@ where
                             StreamingMode::Server => {
                                 emit_event(
                                     &res_tx,
-                                    Some(conn_id),
+                                    maybe_conn_id,
                                     req_id,
-                                    label.as_ref(),
+                                    label,
                                     payload.as_ref(),
                                     StreamingEvent::from_status(Status::failed_precondition(
                                         "finish action is invalid for server streaming",
@@ -344,12 +350,12 @@ where
                         }
                     }
                     StreamingAction::Disconnect => {
-                        let Some(active) = active_streams.remove(&conn_id) else {
+                        let Some(active) = active_streams.remove(&stream_name) else {
                             emit_event(
                                 &res_tx,
-                                Some(conn_id),
+                                maybe_conn_id,
                                 req_id,
-                                label.as_ref(),
+                                label,
                                 payload.as_ref(),
                                 StreamingEvent::from_status(Status::failed_precondition(
                                     "stream is not connected",
@@ -361,9 +367,9 @@ where
                         active.stop();
                         emit_event(
                             &res_tx,
-                            Some(conn_id),
+                            maybe_conn_id,
                             req_id,
-                            label.as_ref(),
+                            label,
                             payload.as_ref(),
                             StreamingEvent::from_status(Status::cancelled(
                                 "stream disconnected by client",

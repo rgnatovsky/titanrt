@@ -2,6 +2,8 @@ use serde_json::Value;
 use std::borrow::Cow;
 use uuid::Uuid;
 
+use crate::utils::time::timestamp::now_micros;
+
 /// Интерфейс "внутреннего" события стрима.
 /// Возвращаем ссылки, чтобы избежать ненужного клонирования.
 
@@ -56,6 +58,7 @@ where
     req_id: Option<Uuid>,
     label: Option<Cow<'static, str>>,
     payload: Option<Value>,
+    timestamp_us: u64,
 }
 
 impl<Inner> StreamEvent<Inner>
@@ -70,6 +73,7 @@ where
             req_id: None,
             label: None,
             payload: None,
+            timestamp_us: now_micros(),
         }
     }
 
@@ -206,6 +210,7 @@ where
             req_id: self.req_id,
             label: self.label,
             payload: self.payload,
+            timestamp_us: now_micros(),
         })
     }
 }
@@ -222,6 +227,7 @@ where
             req_id: self.req_id,
             label: self.label.clone(),
             payload: self.payload.clone(),
+            timestamp_us: self.timestamp_us,
         }
     }
 }

@@ -82,4 +82,8 @@ impl<Client: ClientInitializer<Config>, Config: Clone> ClientsMap<Client, Config
     pub fn get(&self, id: &usize) -> Option<&Client> {
         self.inner.get(id)
     }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
 }

@@ -86,34 +86,44 @@ where
                 let cl_map = clients_map.clone();
                 let res_tx_ref = res_tx.clone();
                 let rl_mgr = action.rl_ctx().as_ref().map(|_| rl_manager.clone());
-                
+
                 local.spawn_local(async move {
-                    let (inner, conn_id, req_id, label, timeout, rl_ctx, rl_weight, json) =
+                    let (maybe_inner, conn_id, req_id, label, timeout, rl_ctx, rl_weight, json) =
                         action.into_parts();
 
-                    let inner = match inner {
-                        Some(i) => i,
-                        None => {
-                            return;
-                        }
-                    };
-
-                    let channel = if let Some(conn_id) = conn_id {
-                        let Some(client) = cl_map.get(&conn_id) else {
-                            return;
-                        };
-                        client.channel()
-                    } else {
-                        return;
-                    };
-
-                    
                     let stream_event = StreamEvent::builder(None)
                         .conn_id(conn_id)
                         .req_id(req_id)
                         .label(label)
                         .payload(json);
 
+                    let inner_action = match maybe_inner {
+                        Some(i) => i,
+                        None => {
+                            let inner_event =
+                                UnaryEvent::from_status(Status::failed_precondition(format!(
+                                    "[TonicStream - Runner] no inner action provided for conn_id",
+                                )));
+
+                            let stream_event = stream_event.inner(inner_event).build().unwrap();
+
+                            let _ = res_tx_ref.try_send(stream_event);
+                            return;
+                        }
+                    };
+
+                    let Some(client) = cl_map.get(&conn_id.unwrap_or(cl_map.len())) else {
+                        let inner_event = UnaryEvent::from_status(Status::failed_precondition(
+                            format!("[TonicStream - Runner] no channel found for",),
+                        ));
+
+                        let stream_event = stream_event.inner(inner_event).build().unwrap();
+
+                        let _ = res_tx_ref.try_send(stream_event);
+                        return;
+                    };
+
+                    let channel = client.channel();
                     let mut grpc = Grpc::new(channel);
 
                     if let Some(s) = ctx.desc.max_decoding_message_size {
@@ -145,7 +155,7 @@ where
                         return;
                     }
 
-                    let result = inner.execute(&mut grpc, timeout).await;
+                    let result = inner_action.execute(&mut grpc, timeout).await;
 
                     match result {
                         Ok(ev) => {

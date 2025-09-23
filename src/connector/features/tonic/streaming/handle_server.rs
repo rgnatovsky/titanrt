@@ -11,6 +11,7 @@ use crate::connector::features::tonic::streaming::utils::{
 use bytes::Bytes;
 use crossbeam::channel::Sender;
 use futures::StreamExt;
+use std::borrow::Cow;
 use std::rc::Rc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -22,6 +23,7 @@ use tonic::{Request, Status};
 pub fn start_server_stream(
     connect: ConnectConfig,
     conn_id: usize,
+    label: Option<Cow<'static, str>>,
     context: StreamContext,
     channel: Channel,
     res_tx: Sender<StreamEvent<StreamingEvent>>,
@@ -33,7 +35,7 @@ pub fn start_server_stream(
     max_dec_size: Option<usize>,
     max_enc_size: Option<usize>,
     local: &LocalSet,
-) -> Result<ActiveStream, Status> {
+) -> ActiveStream {
     let ConnectConfig {
         mode: _,
         method,
@@ -46,7 +48,7 @@ pub fn start_server_stream(
     let handle = local.spawn_local(async move {
         let StreamContext {
             req_id,
-            label,
+            name: stream_name,
             payload,
         } = context;
 
@@ -75,13 +77,13 @@ pub fn start_server_stream(
                 &res_tx,
                 Some(conn_id),
                 req_id,
-                label.as_ref(),
+                label,
                 payload.as_ref(),
                 StreamingEvent::from_status(Status::unavailable(format!(
                     "[TonicStream - Runner] channel not ready with error: {e}",
                 ))),
             );
-            let _ = lifecycle_tx.send(StreamLifecycle::Closed { conn_id });
+            let _ = lifecycle_tx.send(StreamLifecycle::Closed { stream_name });
             return;
         }
 
@@ -97,11 +99,11 @@ pub fn start_server_stream(
                         &res_tx,
                         Some(conn_id),
                         req_id,
-                        label.as_ref(),
+                        label,
                         payload.as_ref(),
                         StreamingEvent::from_status(Status::deadline_exceeded("connect timeout")),
                     );
-                    let _ = lifecycle_tx.send(StreamLifecycle::Closed { conn_id });
+                    let _ = lifecycle_tx.send(StreamLifecycle::Closed { stream_name });
                     return;
                 }
             },
@@ -118,7 +120,7 @@ pub fn start_server_stream(
                                 &res_tx,
                                 Some(conn_id),
                                 req_id,
-                                label.as_ref(),
+                                label.clone(),
                                 payload.as_ref(),
                                 StreamingEvent::from_ok_stream_item(bytes),
                             );
@@ -128,7 +130,7 @@ pub fn start_server_stream(
                                 &res_tx,
                                 Some(conn_id),
                                 req_id,
-                                label.as_ref(),
+                                label.clone(),
                                 payload.as_ref(),
                                 StreamingEvent::from_status(status),
                             );
@@ -142,7 +144,7 @@ pub fn start_server_stream(
                         &res_tx,
                         Some(conn_id),
                         req_id,
-                        label.as_ref(),
+                        label,
                         payload.as_ref(),
                         StreamingEvent::from_ok_stream_close(trailers),
                     ),
@@ -150,7 +152,7 @@ pub fn start_server_stream(
                         &res_tx,
                         Some(conn_id),
                         req_id,
-                        label.as_ref(),
+                        label,
                         payload.as_ref(),
                         StreamingEvent::from_ok_stream_close(metadata.clone()),
                     ),
@@ -158,7 +160,7 @@ pub fn start_server_stream(
                         &res_tx,
                         Some(conn_id),
                         req_id,
-                        label.as_ref(),
+                        label,
                         payload.as_ref(),
                         StreamingEvent::from_status(status),
                     ),
@@ -169,19 +171,19 @@ pub fn start_server_stream(
                     &res_tx,
                     Some(conn_id),
                     req_id,
-                    label.as_ref(),
+                    label,
                     payload.as_ref(),
                     StreamingEvent::from_status(status),
                 );
             }
         }
 
-        let _ = lifecycle_tx.send(StreamLifecycle::Closed { conn_id });
+        let _ = lifecycle_tx.send(StreamLifecycle::Closed { stream_name });
     });
 
-    Ok(ActiveStream {
+    ActiveStream {
         mode: StreamingMode::Server,
         sender: None,
         handle,
-    })
+    }
 }

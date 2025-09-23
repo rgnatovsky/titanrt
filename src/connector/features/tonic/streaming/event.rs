@@ -6,7 +6,7 @@ use crate::connector::features::shared::events::StreamEventInner;
 
 #[derive(Debug, Clone)]
 pub struct StreamingEvent {
-    code: Option<Code>,
+    code: Code,
     err_msg: Option<String>,
     metadata: MetadataMap,
     body: Option<Bytes>,
@@ -14,10 +14,20 @@ pub struct StreamingEvent {
 }
 
 impl StreamingEvent {
+    pub fn from_ok() -> Self {
+        Self {
+            code: Code::Ok,
+            err_msg: None,
+            metadata: MetadataMap::new(),
+            body: None,
+            is_stream_item: false,
+        }
+    }
+
     pub fn from_ok_unary(resp: tonic::Response<Bytes>) -> Self {
         let (metadata, body, _trailing) = resp.into_parts();
         Self {
-            code: None,
+            code: Code::Ok,
             err_msg: None,
             metadata,
             body: Some(body),
@@ -27,7 +37,7 @@ impl StreamingEvent {
 
     pub fn from_ok_stream_item(body: Bytes) -> Self {
         Self {
-            code: None,
+            code: Code::Ok,
             err_msg: None,
             metadata: MetadataMap::new(),
             body: Some(body),
@@ -38,7 +48,7 @@ impl StreamingEvent {
     pub fn from_ok_stream_close(metadata: MetadataMap) -> Self {
         let status = Status::aborted("grpc streaming aborted".to_string());
         Self {
-            code: Some(status.code()),
+            code: status.code(),
             err_msg: Some(status.message().to_string()),
             metadata,
             body: None,
@@ -48,7 +58,7 @@ impl StreamingEvent {
 
     pub fn from_status(st: Status) -> Self {
         Self {
-            code: Some(st.code()),
+            code: st.code(),
             err_msg: Some(st.message().to_string()),
             metadata: st.metadata().clone(),
             body: None,
@@ -79,11 +89,11 @@ impl StreamEventInner for StreamingEvent {
     type Code = Code;
 
     fn status(&self) -> Option<&Self::Code> {
-        self.code.as_ref()
+        Some(&self.code)
     }
 
     fn is_ok(&self) -> bool {
-        self.code.is_none()
+        self.code == Code::Ok
     }
 
     fn error(&self) -> Option<&Self::Err> {

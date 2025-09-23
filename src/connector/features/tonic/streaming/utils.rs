@@ -28,13 +28,13 @@ impl ActiveStream {
 }
 
 pub enum StreamLifecycle {
-    Closed { conn_id: usize },
+    Closed { stream_name: String },
 }
 
 #[derive(Clone)]
 pub struct StreamContext {
     pub req_id: Option<Uuid>,
-    pub label: Option<String>,
+    pub name: String,
     pub payload: Option<Value>,
 }
 
@@ -42,17 +42,14 @@ pub fn emit_event(
     sender: &Sender<StreamEvent<StreamingEvent>>,
     conn_id: Option<usize>,
     req_id: Option<Uuid>,
-    label: Option<&String>,
+    label: Option<Cow<'static, str>>,
     payload: Option<&Value>,
     inner: StreamingEvent,
 ) {
     let mut builder = StreamEvent::builder(Some(inner))
         .conn_id(conn_id)
-        .req_id(req_id);
-
-    if let Some(label) = label {
-        builder = builder.label(Some(Cow::Owned(label.clone())));
-    }
+        .req_id(req_id)
+        .label(label);
 
     if let Some(payload) = payload {
         builder = builder.payload(Some(payload.clone()));

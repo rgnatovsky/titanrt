@@ -34,7 +34,7 @@ impl BaseConnector for WsConnector {
         Ok(Self { config, cancel_token, core_stats })
     }
 
-    fn name(&self) -> impl AsRef<str> + Display { "ws" }
+    fn name(&self) -> impl AsRef<str> + Display { "websocket" }
     fn config(&self) -> &Self::MainConfig { &self.config }
     fn cancel_token(&self) -> &CancelToken { &self.cancel_token }
     fn cores_stats(&self) -> Option<Arc<CoreStats>> { self.core_stats.clone() }
