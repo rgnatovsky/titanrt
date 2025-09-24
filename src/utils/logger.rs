@@ -138,15 +138,12 @@ impl Throttle {
     }
 }
 
-// --- Макросы уровня ---
 
-/// Универсальный макрос: уровень задаётся идентификатором (`error`, `warn`, `info`, `debug`, `trace`).
 #[macro_export]
 macro_rules! log_throttled {
     ($level:ident, $interval:expr, $($arg:tt)*) => {{
-        // Пер-коллсайт статик: один throttle на точку логирования.
-        static _THROTTLE: std::sync::OnceLock<$crate::Throttle> = std::sync::OnceLock::new();
-        let t = _THROTTLE.get_or_init(|| $crate::Throttle::new($interval));
+        static _THROTTLE: std::sync::OnceLock<$crate::utils::logger::Throttle> = std::sync::OnceLock::new();
+        let t = _THROTTLE.get_or_init(|| $crate::utils::logger::Throttle::new($interval));
         if let Some(_suppressed) = t.poll() {
             if _suppressed > 0 {
                 tracing::$level!(suppressed = _suppressed, $($arg)*);
@@ -157,7 +154,6 @@ macro_rules! log_throttled {
     }};
 }
 
-/// Сокращённые удобные макросы под каждый уровень
 #[macro_export]
 macro_rules! error_throttled { ($interval:expr, $($arg:tt)*) => { $crate::log_throttled!(error, $interval, $($arg)*); } }
 #[macro_export]
@@ -168,3 +164,23 @@ macro_rules! info_throttled  { ($interval:expr, $($arg:tt)*) => { $crate::log_th
 macro_rules! debug_throttled { ($interval:expr, $($arg:tt)*) => { $crate::log_throttled!(debug, $interval, $($arg)*); } }
 #[macro_export]
 macro_rules! trace_throttled { ($interval:expr, $($arg:tt)*) => { $crate::log_throttled!(trace, $interval, $($arg)*); } }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+
+    #[test]
+    fn first_call_emits_immediately() {
+        let logger = LoggerConfig {
+            level: "debug".to_string(),
+            file_dir: None,
+            file_prefix: None,
+            rolling: None,
+            max_files: 2,
+        };
+        let _guard = logger.init().unwrap();
+
+        crate::info_throttled!(Duration::from_millis(50), "hello {}", 1);
+    }
+}
