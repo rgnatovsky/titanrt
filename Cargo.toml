@@ -55,6 +55,7 @@ tungstenite = { version = "0.21", default-features = false, features = [
     "rustls-tls-webpki-roots",
     "handshake",
 ], optional = true }
+tokio-tungstenite = { version = "0.21", default-features = false, features = ["connect", "rustls-tls-native-roots"], optional = true }
 url = "2"
 prost = { version = "0.14.1", optional = true }
 prost-types = { version = "0.14.1", optional = true }
@@ -74,4 +75,10 @@ reqwest_conn = ["reqwest", "serde_urlencoded", "shared"]
 tonic_conn = ["tonic", "prost", "prost-types", "shared"]
 nats_bridge = ["async-nats"]
 shared = []
-websocket = ["tungstenite"]
+websocket = ["tungstenite", "tokio-tungstenite", "shared"]
+
+
+
+
+
+
