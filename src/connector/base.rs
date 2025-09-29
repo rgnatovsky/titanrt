@@ -1,5 +1,5 @@
 use crate::connector::hook::IntoHook;
-use crate::connector::{Stream, StreamDescriptor, StreamSpawner};
+use crate::connector::{EventTxType, Stream, StreamDescriptor, StreamSpawner};
 use crate::io::base::{BaseTx, TxPairExt};
 use crate::utils::*;
 use serde::Deserialize;
@@ -48,12 +48,13 @@ pub trait BaseConnector: Sized + Send + 'static {
     ///
     /// - `desc`: stream descriptor (venue/kind/bounds/core policy).
     /// - `hook`: translation callback from raw messages to typed events.
-    /// - Returns a `Stream` exposing action TX, event RX, health, cancel, and join.
+    /// - Returns a `Stream` exposing action TX, optional event RX, health, cancel, and join.
     fn spawn_stream<D, E, R, S, H>(
         &mut self,
         desc: D,
+        event_tx_type: EventTxType<E>,
         hook: H,
-    ) -> anyhow::Result<Stream<Self::ActionTx, E::RxHalf, S>>
+    ) -> anyhow::Result<Stream<Self::ActionTx, Option<E::RxHalf>, S>>
     where
         Self: StreamSpawner<D, E, R, S>,
         D: StreamDescriptor,
@@ -65,6 +66,7 @@ pub trait BaseConnector: Sized + Send + 'static {
         <Self as StreamSpawner<D, E, R, S>>::spawn(
             self,
             desc,
+            event_tx_type,
             hook,
             self.cancel_token().new_child(),
             self.cores_stats(),

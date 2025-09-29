@@ -8,7 +8,7 @@ use titanrt::connector::features::reqwest::rate_limiter::{
 use titanrt::connector::features::reqwest::stream::actions::{ReqwestAction, Url};
 use titanrt::connector::features::reqwest::stream::descriptor::ReqwestStreamDescriptor;
 use titanrt::connector::features::reqwest::stream::event::ReqwestEvent;
-use titanrt::connector::{BaseConnector, HookArgs, Stream};
+use titanrt::connector::{BaseConnector, EventTxType, HookArgs, Stream};
 use titanrt::control::inputs::InputMeta;
 use titanrt::io::ringbuffer::{RingReceiver, RingSender};
 use titanrt::model::{ExecutionResult, NullEvent, NullModelCtx, NullOutputTx, StopKind, StopState};
@@ -20,7 +20,7 @@ use titanrt::utils::{CancelToken, NullReducer, NullState};
 #[derive(Default, Deserialize, Clone)]
 pub struct TestModel2Config {}
 pub struct TestModel2 {
-    stream: Stream<RingSender<ReqwestAction>, RingReceiver<bool>, NullState>,
+    stream: Stream<RingSender<ReqwestAction>, Option<RingReceiver<bool>>, NullState>,
     now: Instant,
 }
 
@@ -67,7 +67,7 @@ impl BaseModel for TestModel2 {
             }],
         });
 
-        let stream = conn.spawn_stream(desc, hook)?;
+        let stream = conn.spawn_stream(desc, EventTxType::Own, hook)?;
 
         while !stream.is_healthy() {
             sleep(std::time::Duration::from_secs(1));

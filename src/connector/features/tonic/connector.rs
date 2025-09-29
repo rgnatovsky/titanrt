@@ -97,7 +97,7 @@ mod tests {
 
     use crate::{
         connector::{
-            BaseConnector, HookArgs,
+            BaseConnector, EventTxType, HookArgs,
             features::{
                 shared::{clients_map::SpecificClient, events::StreamEvent},
                 tonic::{
@@ -168,9 +168,13 @@ mod tests {
         );
 
         let streaming_descriptor = TonicStreamingDescriptor::high_throughput();
-        
+
         let mut geyser_stream = tonic_conn
-            .spawn_stream(streaming_descriptor, streaming_geyser_hook)
+            .spawn_stream(
+                streaming_descriptor,
+                EventTxType::Own,
+                streaming_geyser_hook,
+            )
             .unwrap();
 
         let mut req = SubscribeRequest::default();
@@ -242,7 +246,6 @@ mod tests {
 
     #[test]
     fn test_unary_stream() {
-    
         let _logger = logging_init("debug");
         let conn_id = 0;
         let mut tonic_conn = tonic_conn_init("https://grpcb.in:9001", true, conn_id);
@@ -252,7 +255,7 @@ mod tests {
         jito_unary_descriptor.max_encoding_message_size = Some(10 * 1024 * 1024);
 
         let mut grpc_unary_stream = tonic_conn
-            .spawn_stream(jito_unary_descriptor, test_unary_hook)
+            .spawn_stream(jito_unary_descriptor, EventTxType::Own, test_unary_hook)
             .expect("spawn grpc stream failed");
 
         let msg = DummyMessage {

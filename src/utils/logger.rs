@@ -138,7 +138,6 @@ impl Throttle {
     }
 }
 
-
 #[macro_export]
 macro_rules! log_throttled {
     ($level:ident, $interval:expr, $($arg:tt)*) => {{
@@ -168,7 +167,6 @@ macro_rules! trace_throttled { ($interval:expr, $($arg:tt)*) => { $crate::log_th
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[test]
     fn first_call_emits_immediately() {

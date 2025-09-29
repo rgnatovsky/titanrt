@@ -11,7 +11,7 @@ use crate::connector::{
 };
 use crate::io::ringbuffer::{RingReceiver, RingSender};
 use crate::prelude::{BaseRx, TxPairExt};
-use crate::utils::{Reducer, StateMarker, NullState};
+use crate::utils::{NullState, Reducer, StateMarker};
 use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::net::TcpStream;
@@ -20,7 +20,7 @@ use tungstenite::{Message as WsMsg, WebSocket, connect, stream::MaybeTlsStream};
 use url::Url;
 
 type ActionTx = RingSender<StreamAction<WsAction>>; // канал для действий (что прислал пользователь).
-type EventRx = RingReceiver<StreamEvent<WsEvent>>; // канал для событий (что мы эмитим наружу).
+type EventRx = Option<RingReceiver<StreamEvent<WsEvent>>>; // канал для событий (что мы эмитим наружу).
 pub type WsStream = Stream<ActionTx, EventRx, NullState>; // конкретный тип стрима (action_tx, event_rx, без состояния).
 
 pub struct WsConnectorRunner; // Маркер — сам раннер.
@@ -28,8 +28,8 @@ pub struct WsConnectorRunner; // Маркер — сам раннер.
 // живое подключение
 pub struct Conn {
     ws: WebSocket<MaybeTlsStream<TcpStream>>, // сам вебсокет
-    last_ping: Instant, // время последнего пинга
-    ping_interval: Option<Duration>, // интервал пинга
+    last_ping: Instant,                       // время последнего пинга
+    ping_interval: Option<Duration>,          // интервал пинга
 }
 
 impl Conn {
@@ -103,10 +103,12 @@ where
             while let Ok(action) = ctx.action_rx.try_recv() {
                 let (inner, conn_id, _req_id, _label, _timeout, _rl_ctx, _rl_weight, _json) =
                     action.into_parts();
-                    // Проверяем очередь действий.
+                // Проверяем очередь действий.
                 let Some(conn_id) = conn_id else {
                     // Если conn_id нет → шлём ошибку.
-                    let ev = StreamEvent::new(WsEvent::from_error("ws action missing conn_id".to_string()));
+                    let ev = StreamEvent::new(WsEvent::from_error(
+                        "ws action missing conn_id".to_string(),
+                    ));
                     hook.call(HookArgs::new(
                         ev,
                         &mut ctx.event_tx,
@@ -167,8 +169,9 @@ where
                                 WsSendPayload::Binary(b) => conn.ws.send(WsMsg::Binary(b.to_vec())),
                             };
                             if let Err(e) = res {
-                                let ev =
-                                    StreamEvent::new(WsEvent::from_error(format!("send error: {e}")));
+                                let ev = StreamEvent::new(WsEvent::from_error(format!(
+                                    "send error: {e}"
+                                )));
                                 hook.call(HookArgs::new(
                                     ev,
                                     &mut ctx.event_tx,
@@ -179,8 +182,9 @@ where
                                 ));
                             }
                         } else {
-                            let ev =
-                                StreamEvent::new(WsEvent::from_error("send to unknown conn_id".to_string()));
+                            let ev = StreamEvent::new(WsEvent::from_error(
+                                "send to unknown conn_id".to_string(),
+                            ));
                             hook.call(HookArgs::new(
                                 ev,
                                 &mut ctx.event_tx,

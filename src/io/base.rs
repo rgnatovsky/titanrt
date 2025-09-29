@@ -159,3 +159,44 @@ impl TxPairExt for NullTx {
         (NullTx, NullRx)
     }
 }
+
+impl<E> BaseRx for Option<E>
+where
+    E: BaseRx,
+{
+    type EventType = <E as BaseRx>::EventType;
+
+    fn try_recv(&mut self) -> Result<Self::EventType, TryRecvError> {
+        match self {
+            Some(rx) => rx.try_recv(),
+            None => Err(TryRecvError::Disconnected),
+        }
+    }
+
+    fn recv(
+        &mut self,
+        cancel: &CancelToken,
+        timeout: Option<Duration>,
+    ) -> Result<Self::EventType, RecvError> {
+        match self {
+            Some(rx) => rx.recv(cancel, timeout),
+            None => Err(RecvError::Absent),
+        }
+    }
+
+    fn drain(&mut self, max: usize) -> Vec<Self::EventType> {
+        match self {
+            Some(rx) => rx.drain(max),
+            None => Vec::new(),
+        }
+    }
+
+    fn drain_max(&mut self) -> Vec<Self::EventType> {
+        match self {
+            Some(rx) => rx.drain_max(),
+            None => Vec::new(),
+        }
+    }
+}
+
+impl<E> RxMarker for Option<E> where E: BaseRx + RxMarker {}

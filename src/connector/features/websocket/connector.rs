@@ -30,12 +30,26 @@ impl BaseConnector for WsConnector {
                 config.specific_core_ids.clone(),
                 reserved_core_ids.unwrap_or_default(),
             )?)
-        } else { None };
-        Ok(Self { config, cancel_token, core_stats })
+        } else {
+            None
+        };
+        Ok(Self {
+            config,
+            cancel_token,
+            core_stats,
+        })
     }
 
-    fn name(&self) -> impl AsRef<str> + Display { "websocket" }
-    fn config(&self) -> &Self::MainConfig { &self.config }
-    fn cancel_token(&self) -> &CancelToken { &self.cancel_token }
-    fn cores_stats(&self) -> Option<Arc<CoreStats>> { self.core_stats.clone() }
+    fn name(&self) -> impl AsRef<str> + Display {
+        "websocket"
+    }
+    fn config(&self) -> &Self::MainConfig {
+        &self.config
+    }
+    fn cancel_token(&self) -> &CancelToken {
+        &self.cancel_token
+    }
+    fn cores_stats(&self) -> Option<Arc<CoreStats>> {
+        self.core_stats.clone()
+    }
 }

@@ -4,7 +4,7 @@ use crate::connector::{
 use anyhow::anyhow;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use titanrt::connector::{BaseConnector, HookArgs, Stream};
+use titanrt::connector::{BaseConnector, EventTxType, HookArgs, Stream};
 use titanrt::control::inputs::InputMeta;
 use titanrt::io::ringbuffer::{RingReceiver, RingSender};
 use titanrt::prelude::*;
@@ -23,7 +23,7 @@ pub struct TestModel {
     _outputs: NullOutputTx,
     _cancel_token: CancelToken,
     last_seq: u64,
-    stream: Stream<RingSender<CounterAction>, RingReceiver<u64>, CounterState>,
+    stream: Stream<RingSender<CounterAction>, Option<RingReceiver<u64>>, CounterState>,
     count: u64,
     _ctx: NullModelCtx,
 }
@@ -77,7 +77,7 @@ impl BaseModel for TestModel {
 
         let desc = CounterDescriptor::new(30, 0, Some(CorePickPolicy::Specific(9)));
 
-        let stream = connector.spawn_stream(desc, my_counter_hook)?;
+        let stream = connector.spawn_stream(desc, EventTxType::Own, my_counter_hook)?;
 
         while !stream.is_healthy() {
             thread::yield_now();

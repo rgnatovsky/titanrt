@@ -6,6 +6,25 @@ use std::{sync::Arc, thread};
 use uuid::Uuid;
 use uuid::fmt::Simple;
 
+#[derive(Debug)]
+pub enum EventTxType<E> {
+    External(E),
+    Own,
+}
+
+impl<E> EventTxType<E> {
+    #[inline]
+    pub fn external(tx: E) -> Self {
+        Self::External(tx)
+    }
+}
+
+impl<E> Default for EventTxType<E> {
+    fn default() -> Self {
+        Self::Own
+    }
+}
+
 /// Blanket helper for spawning typed streams from a connector.
 ///
 /// A `StreamSpawner` is implemented on top of a [`StreamRunner`].
@@ -32,14 +51,15 @@ where
     /// - Creates state cell and health flag.
     /// - Applies core pinning policy if provided.
     /// - Spawns the worker thread running [`StreamRunner::run`].
-    /// - Returns a [`Stream`] handle with action TX, event RX, state, cancel, and health.
+    /// - Returns a [`Stream`] handle with action TX, optional event RX, state, cancel, and health.
     fn spawn<H>(
         &mut self,
         desc: D,
+        event_tx_type: EventTxType<E>,
         hook: H,
         cancel: CancelToken,
         core_stats: Option<Arc<CoreStats>>,
-    ) -> anyhow::Result<Stream<Self::ActionTx, E::RxHalf, S>>
+    ) -> anyhow::Result<Stream<Self::ActionTx, Option<E::RxHalf>, S>>
     where
         H: IntoHook<Self::RawEvent, E, R, S, D, Self::HookResult>,
     {
@@ -61,18 +81,25 @@ where
         let state = StateCell::<S>::new_default();
         let health = HealthFlag::new(desc.health_at_start());
 
-        // Channels: actions (model→worker)
+        // Channels: actions (model->worker)
         let (action_tx, action_rx) = if let Some(bound) = desc.max_pending_actions() {
             <Self::ActionTx as TxPairExt>::bound(bound)
         } else {
             <Self::ActionTx as TxPairExt>::unbound()
         };
 
-        // Channels: events (worker→model)
-        let (event_tx, event_rx) = if let Some(bound) = desc.max_pending_events() {
-            E::bound(bound)
-        } else {
-            E::unbound()
+        // Channels: events (worker->model)
+        let (event_tx, event_rx) = match event_tx_type {
+            EventTxType::Own => {
+                if let Some(bound) = desc.max_pending_events() {
+                    let (tx, rx) = E::bound(bound);
+                    (tx, Some(rx))
+                } else {
+                    let (tx, rx) = E::unbound();
+                    (tx, Some(rx))
+                }
+            }
+            EventTxType::External(tx) => (tx, None),
         };
 
         let reducer = R::default();
@@ -81,89 +108,86 @@ where
 
         // Spawn worker thread
         let handle = thread::Builder::new()
-         .name(self.thread_name(&desc, stream_id))
-         .spawn({
-            let rt_ctx = RuntimeCtx::new(
-               ctx,
-               desc,
-               action_rx,
-               event_tx,
-               reducer,
-               state.clone(),
-               cancel.clone(),
-               health.clone(),
-            );
+            .name(self.thread_name(&desc, stream_id))
+            .spawn({
+                let rt_ctx = RuntimeCtx::new(
+                    ctx,
+                    desc,
+                    action_rx,
+                    event_tx,
+                    reducer,
+                    state.clone(),
+                    cancel.clone(),
+                    health.clone(),
+                );
 
-            let health = health.clone();
+                let health = health.clone();
 
-            move || {
-               let mut _core_lease = None;
+                move || {
+                    let mut _core_lease = None;
 
-               // Apply core pinning policy if any
-               if let Some(policy) = rt_ctx.desc.core_pick_policy() {
-                  match (core_stats, policy.specific()) {
-                     // Reserve/pin via CoreStats
-                     (Some(cs), _) => {
-                        let lease = cs.reserve(policy);
-                        match try_pin_core(lease.core_id) {
-                           Ok(core_id) => {
-                              tracing::info!("pinned core {} successfully", core_id);
-                              _core_lease = Some(lease); // keep guard alive
-                           }
-                           Err(err) => {
-                              tracing::error!(
+                    // Apply core pinning policy if any
+                    if let Some(policy) = rt_ctx.desc.core_pick_policy() {
+                        match (core_stats, policy.specific()) {
+                            // Reserve/pin via CoreStats
+                            (Some(cs), _) => {
+                                let lease = cs.reserve(policy);
+                                match try_pin_core(lease.core_id) {
+                                    Ok(core_id) => {
+                                        tracing::info!("pinned core {} successfully", core_id);
+                                        _core_lease = Some(lease); // keep guard alive
+                                    }
+                                    Err(err) => {
+                                        tracing::error!(
                                             "failed to pin core {}: {}",
                                             lease.core_id,
                                             err
                                         );
-                           }
-                        }
-                     }
-                     // Specific core requested but no CoreStats available
-                     (None, Some(core_id)) => {
-                        tracing::warn!(
+                                    }
+                                }
+                            }
+                            // Specific core requested but no CoreStats available
+                            (None, Some(core_id)) => {
+                                tracing::warn!(
                                     "core pinning policy is set to specific, but no core stats available"
                                 );
-                        match try_pin_core(core_id) {
-                           Ok(core_id) => {
-                              tracing::info!("pinned core {} successfully", core_id);
-                           }
-                           Err(err) => {
-                              tracing::error!(
+                                match try_pin_core(core_id) {
+                                    Ok(core_id) => {
+                                        tracing::info!("pinned core {} successfully", core_id);
+                                    }
+                                    Err(err) => {
+                                        tracing::error!(
                                             "failed to pin core {}: {}",
                                             core_id,
                                             err
                                         );
-                           }
-                        }
-                     }
-                     // Policy requires stats but none provided
-                     (None, None) => {
-                        tracing::warn!(
+                                    }
+                                }
+                            }
+                            // Policy requires stats but none provided
+                            (None, None) => {
+                                tracing::warn!(
                                     "core pinning policy requires core stats, but none are available"
                                 );
-                     }
-                  }
-               }
+                            }
+                        }
+                    }
 
-               // Run the worker
-               let res = Self::run(rt_ctx, hook);
+                    // Run the worker
+                    let res = Self::run(rt_ctx, hook);
 
-               health.down();
+                    health.down();
 
-               match &res {
-                  Ok(()) => {}
-                  Err(err) => {
-                     tracing::error!("stream {} failed: {}", stream_id, err);
-                  }
-               }
+                    if let Err(err) = &res {
+                        tracing::error!("stream {} failed: {}", stream_id, err);
+                    }
 
-               res
-            }
-         })?;
+                    res
+                }
+            })?;
 
         // Wrap into a `Stream` handle
-        let stream = Stream::<Self::ActionTx, E::RxHalf, S>::new(
+        let stream = Stream::<Self::ActionTx, Option<E::RxHalf>, S>::new(
             stream_id, handle, health, action_tx, event_rx, state, cancel,
         );
 
