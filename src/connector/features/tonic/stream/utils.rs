@@ -1,6 +1,6 @@
 use crate::connector::features::shared::events::StreamEvent;
-use crate::connector::features::tonic::streaming::StreamingMode;
-use crate::connector::features::tonic::streaming::event::StreamingEvent;
+use crate::connector::features::tonic::stream::GrpcStreamMode;
+use crate::connector::features::tonic::stream::event::GrpcEvent;
 
 use bytes::Bytes;
 use crossbeam::channel::Sender;
@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 pub struct ActiveStream {
-    pub mode: StreamingMode,
+    pub mode: GrpcStreamMode,
     pub sender: Option<mpsc::Sender<Bytes>>,
     pub handle: tokio::task::JoinHandle<()>,
 }
@@ -39,12 +39,12 @@ pub struct StreamContext {
 }
 
 pub fn emit_event(
-    sender: &Sender<StreamEvent<StreamingEvent>>,
+    sender: &Sender<StreamEvent<GrpcEvent>>,
     conn_id: Option<usize>,
     req_id: Option<Uuid>,
     label: Option<Cow<'static, str>>,
     payload: Option<&Value>,
-    inner: StreamingEvent,
+    inner: GrpcEvent,
 ) {
     let mut builder = StreamEvent::builder(Some(inner))
         .conn_id(conn_id)

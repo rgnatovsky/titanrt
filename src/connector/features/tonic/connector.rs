@@ -107,10 +107,10 @@ mod tests {
                         DummyMessage, SubscribeRequest, SubscribeRequestFilterBlocks,
                         SubscribeRequestFilterSlots, dummy_message,
                     },
-                    streaming::{
-                        StreamingAction, StreamingEvent, StreamingMode, TonicStreamingDescriptor,
+                    stream::{
+                        GrpcEvent, GrpcMethod, GrpcStreamCommand, GrpcStreamMode, GrpcUnaryCall,
+                        TonicDescriptor,
                     },
-                    unary::{GrpcMethod, TonicUnaryDescriptor, UnaryAction, UnaryEvent},
                 },
             },
         },
@@ -167,7 +167,7 @@ mod tests {
             conn_id,
         );
 
-        let streaming_descriptor = TonicStreamingDescriptor::high_throughput();
+        let streaming_descriptor = TonicDescriptor::high_throughput();
 
         let mut geyser_stream = tonic_conn
             .spawn_stream(
@@ -187,13 +187,13 @@ mod tests {
             },
         );
 
-        let connection = StreamingAction::connect(
+        let connection = GrpcStreamCommand::connect(
             GrpcMethod::Full {
                 pkg: "geyser",
                 service: "Geyser",
                 method: "Subscribe",
             },
-            StreamingMode::Bidi,
+            GrpcStreamMode::Bidi,
         )
         .subscription(req)
         .header_kv("x-token", "--token-value--")
@@ -220,7 +220,7 @@ mod tests {
 
         geyser_stream
             .try_send(
-                StreamingAction::send(req)
+                GrpcStreamCommand::send(req)
                     .to_builder()
                     .conn_id(conn_id)
                     .build(),
@@ -234,11 +234,11 @@ mod tests {
 
     pub fn streaming_geyser_hook(
         args: HookArgs<
-            StreamEvent<StreamingEvent>,
+            StreamEvent<GrpcEvent>,
             RingSender<()>,
             NullReducer,
             NullState,
-            TonicStreamingDescriptor,
+            TonicDescriptor,
         >,
     ) {
         tracing::debug!("Geyser hook: event={:?}", args.raw);
@@ -250,7 +250,7 @@ mod tests {
         let conn_id = 0;
         let mut tonic_conn = tonic_conn_init("https://grpcb.in:9001", true, conn_id);
 
-        let mut jito_unary_descriptor = TonicUnaryDescriptor::high_throughput();
+        let mut jito_unary_descriptor = TonicDescriptor::high_throughput();
         jito_unary_descriptor.max_decoding_message_size = Some(10 * 1024 * 1024);
         jito_unary_descriptor.max_encoding_message_size = Some(10 * 1024 * 1024);
 
@@ -281,7 +281,7 @@ mod tests {
             f_floats: vec![1.1, 2.2, 3.3],
         };
 
-        let action = UnaryAction::new(
+        let action = GrpcUnaryCall::new(
             GrpcMethod::Full {
                 pkg: "grpcbin",
                 service: "GRPCBin",
@@ -307,11 +307,11 @@ mod tests {
 
     pub fn test_unary_hook(
         args: HookArgs<
-            StreamEvent<UnaryEvent>,
+            StreamEvent<GrpcEvent>,
             RingSender<()>,
             NullReducer,
             NullState,
-            TonicUnaryDescriptor,
+            TonicDescriptor,
         >,
     ) {
         if let Ok(m) = args.raw.inner().decode_as::<DummyMessage>() {

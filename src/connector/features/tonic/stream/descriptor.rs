@@ -8,7 +8,7 @@ const fn default_outbound_buffer() -> usize {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct TonicStreamingDescriptor {
+pub struct TonicDescriptor {
     /// Maximum number of hook calls at once.
     pub max_hook_calls_at_once: usize,
     /// Delay between async tasks.
@@ -31,7 +31,7 @@ pub struct TonicStreamingDescriptor {
     pub outbound_buffer: usize,
 }
 
-impl TonicStreamingDescriptor {
+impl TonicDescriptor {
     pub fn new(
         max_hook_calls_at_once: Option<usize>,
         wait_async_tasks_us: Option<u64>,
@@ -75,7 +75,7 @@ impl TonicStreamingDescriptor {
     }
 }
 
-impl Default for TonicStreamingDescriptor {
+impl Default for TonicDescriptor {
     fn default() -> Self {
         Self {
             max_hook_calls_at_once: 10,
@@ -91,13 +91,13 @@ impl Default for TonicStreamingDescriptor {
     }
 }
 
-impl StreamDescriptor for TonicStreamingDescriptor {
+impl StreamDescriptor for TonicDescriptor {
     fn venue(&self) -> impl Venue {
         "any"
     }
 
     fn kind(&self) -> impl Kind {
-        "tonic_streaming"
+        "tonic"
     }
 
     fn max_pending_actions(&self) -> Option<usize> {
