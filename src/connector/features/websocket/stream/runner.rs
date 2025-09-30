@@ -2,27 +2,25 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::time::Duration;
 
+use crate::connector::hook::Hook;
 use anyhow::anyhow;
 use bytes::Bytes;
 use crossbeam::channel::{Sender, unbounded};
 use futures::{SinkExt, StreamExt};
 use serde_json::Value;
-use crate::connector::hook::Hook;
-use tokio::net::TcpStream;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::task::{LocalSet, yield_now};
 use tokio::time::{sleep, timeout};
-use tokio_tungstenite::{
-    MaybeTlsStream, connect_async,
-    tungstenite::{
-        Message,
-        client::IntoClientRequest,
-        http::{HeaderValue, Request, header::SEC_WEBSOCKET_PROTOCOL},
-        protocol::{CloseFrame, frame::coding::CloseCode},
-    },
+use tokio_tungstenite::connect_async_with_config;
+use tokio_tungstenite::tungstenite::{
+    Message,
+    client::IntoClientRequest,
+    http::{HeaderValue, Request, header::SEC_WEBSOCKET_PROTOCOL},
+    protocol::{CloseFrame, frame::coding::CloseCode},
 };
 use tracing::{error, warn};
+use tungstenite::protocol::WebSocketConfig;
 use uuid::Uuid;
 
 use crate::connector::errors::{StreamError, StreamResult};
@@ -416,25 +414,6 @@ async fn wait_for_cancel(token: CancelToken) {
     }
 }
 
-fn apply_tcp_nodelay(stream: &mut MaybeTlsStream<TcpStream>, enabled: bool) {
-    if !enabled {
-        return;
-    }
-
-    match stream {
-        MaybeTlsStream::Plain(tcp) => {
-            if let Err(err) = tcp.set_nodelay(true) {
-                warn!(?err, "failed to set TCP_NODELAY");
-            }
-        }
-        MaybeTlsStream::Rustls(_) => {
-            warn!("cannot adjust TCP_NODELAY on rustls streams yet");
-        }
-        #[allow(unreachable_patterns)]
-        _ => {}
-    }
-}
-
 async fn run_session(
     conn_id: usize,
     client: WebSocketClient,
@@ -451,7 +430,10 @@ async fn run_session(
     }
 
     let request = build_request(&client, &connect)?;
-    let connect_future = connect_async(request);
+    let mut ws_cfg = WebSocketConfig::default();
+    ws_cfg.max_message_size = client.max_message_size;
+
+    let connect_future = connect_async_with_config(request, Some(ws_cfg), client.tcp_nodelay);
 
     let (mut ws_stream, response) = if let Some(connect_deadline) = client.connect_timeout {
         match timeout(connect_deadline, connect_future).await {
@@ -471,8 +453,6 @@ async fn run_session(
     } else {
         connect_future.await?
     };
-
-    apply_tcp_nodelay(ws_stream.get_mut(), client.tcp_nodelay);
 
     let protocol = response
         .headers()
