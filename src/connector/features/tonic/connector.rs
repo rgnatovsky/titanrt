@@ -1,5 +1,5 @@
 use crate::connector::BaseConnector;
-use crate::connector::features::shared::clients_map::{ClientConfig, ClientsMap};
+use crate::connector::features::shared::clients_map::{ClientConfig, ClientsMap, SpecificClient};
 use crate::connector::features::tonic::client::{TonicChannelSpec, TonicClient};
 use crate::utils::{CancelToken, CoreStats};
 
@@ -26,6 +26,21 @@ pub struct TonicConnector {
 impl TonicConnector {
     pub fn clients_map(&self) -> ClientsMap<TonicClient, TonicChannelSpec> {
         self.clients_map.clone()
+    }
+
+    pub fn upsert_client(
+        &self,
+        client: SpecificClient<TonicChannelSpec>,
+    ) -> anyhow::Result<Arc<TonicClient>> {
+        self.clients_map.upsert(client)
+    }
+
+    pub fn remove_client(&self, id: usize) -> Option<Arc<TonicClient>> {
+        self.clients_map.remove(id)
+    }
+
+    pub fn next_client_id(&self) -> usize {
+        self.clients_map.next_vacant_id()
     }
 
     pub fn rt_tokio(&self) -> Arc<Runtime> {

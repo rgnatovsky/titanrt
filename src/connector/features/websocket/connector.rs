@@ -1,5 +1,5 @@
 use crate::connector::BaseConnector;
-use crate::connector::features::shared::clients_map::{ClientConfig, ClientsMap};
+use crate::connector::features::shared::clients_map::{ClientConfig, ClientsMap, SpecificClient};
 use crate::connector::features::websocket::client::{WebSocketClient, WebSocketClientSpec};
 use crate::utils::{CancelToken, CoreStats};
 use serde::{Deserialize, Serialize};
@@ -24,6 +24,21 @@ pub struct WebSocketConnector {
 impl WebSocketConnector {
     pub fn clients_map(&self) -> ClientsMap<WebSocketClient, WebSocketClientSpec> {
         self.clients_map.clone()
+    }
+
+    pub fn upsert_client(
+        &self,
+        client: SpecificClient<WebSocketClientSpec>,
+    ) -> anyhow::Result<Arc<WebSocketClient>> {
+        self.clients_map.upsert(client)
+    }
+
+    pub fn remove_client(&self, id: usize) -> Option<Arc<WebSocketClient>> {
+        self.clients_map.remove(id)
+    }
+
+    pub fn next_client_id(&self) -> usize {
+        self.clients_map.next_vacant_id()
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::connector::BaseConnector;
 use crate::connector::features::reqwest::client::{ReqwestClient, ReqwestClientSpec};
-use crate::connector::features::shared::clients_map::{ClientConfig, ClientsMap};
+use crate::connector::features::shared::clients_map::{ClientConfig, ClientsMap, SpecificClient};
 use crate::utils::{CancelToken, CoreStats};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
@@ -25,6 +25,21 @@ pub struct ReqwestConnector {
 impl ReqwestConnector {
     pub fn clients_map(&self) -> ClientsMap<ReqwestClient, ReqwestClientSpec> {
         self.clients_map.clone()
+    }
+
+    pub fn upsert_client(
+        &self,
+        client: SpecificClient<ReqwestClientSpec>,
+    ) -> anyhow::Result<Arc<ReqwestClient>> {
+        self.clients_map.upsert(client)
+    }
+
+    pub fn remove_client(&self, id: usize) -> Option<Arc<ReqwestClient>> {
+        self.clients_map.remove(id)
+    }
+
+    pub fn next_client_id(&self) -> usize {
+        self.clients_map.next_vacant_id()
     }
 }
 
@@ -77,3 +92,4 @@ impl Display for ReqwestConnector {
         write!(f, "BinanceConnector")
     }
 }
+

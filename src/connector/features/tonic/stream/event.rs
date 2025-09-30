@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use bytes::Bytes;
-use tonic::{metadata::MetadataMap, Code, Status};
+use tonic::{Code, Status, metadata::MetadataMap};
 
 use crate::connector::features::shared::events::StreamEventInner;
 
@@ -10,7 +10,7 @@ pub enum GrpcEventKind {
     StreamDisconnected,
     StreamItem,
     UnaryResponse,
-    BadCommand
+    BadCommand,
 }
 
 #[derive(Debug, Clone)]

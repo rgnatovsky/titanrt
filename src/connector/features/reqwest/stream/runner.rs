@@ -85,7 +85,7 @@ where
             }
 
             while let Ok(mut action) = ctx.action_rx.try_recv() {
-                let Some(client) = action.conn_id().and_then(|id| ctx.cfg.get(&id).cloned()) else {
+                let Some(client) = action.conn_id().and_then(|id| ctx.cfg.get(&id)) else {
                     continue;
                 };
                 let inner = match action.inner_take() {
@@ -94,7 +94,7 @@ where
                 };
 
                 let request = match inner
-                    .to_request_builder(&client.0, action.timeout())
+                    .to_request_builder(&client.as_ref().0, action.timeout())
                     .build()
                 {
                     Ok(request) => request,
@@ -134,7 +134,7 @@ where
                             }
                         }
                     }
-                    let out = client.0.execute(request).await;
+                    let out = client.as_ref().0.execute(request).await;
                     let inner = match out {
                         Ok(resp) => ReqwestEvent::from_raw(resp).await,
                         Err(e) => ReqwestEvent::from_error(e),

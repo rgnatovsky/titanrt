@@ -1,7 +1,8 @@
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 
 use ahash::AHashMap;
-use anyhow::Result;
+use anyhow::{Result, anyhow};
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 
@@ -29,15 +30,28 @@ where
 
 #[derive(Clone)]
 pub struct ClientsMap<Client: ClientInitializer<Spec>, Spec: Clone> {
-    pub(crate) inner: Arc<AHashMap<usize, Client>>,
+    inner: Arc<RwLock<AHashMap<usize, Arc<Client>>>>,
+    init_rt: Option<Arc<Runtime>>,
     _spec: PhantomData<Spec>,
 }
 
 impl<Client: ClientInitializer<Config>, Config: Clone> ClientsMap<Client, Config> {
     pub fn new(config: &ClientConfig<Config>, rt: Option<Arc<Runtime>>) -> Result<Self> {
-        let mut clients_map = AHashMap::new();
+        let map = Self {
+            inner: Arc::new(RwLock::new(AHashMap::new())),
+            init_rt: rt,
+            _spec: PhantomData,
+        };
 
+        map.rebuild(config)?;
+
+        Ok(map)
+    }
+
+    /// Rebuild the map from a full configuration snapshot.
+    pub fn rebuild(&self, config: &ClientConfig<Config>) -> Result<()> {
         let mut id_seen: HashSet<usize> = HashSet::default();
+        let mut prepared: Vec<(usize, Arc<Client>)> = Vec::with_capacity(config.specific.len() + 1);
 
         for spec in config.specific.iter() {
             if !id_seen.insert(spec.id) {
@@ -49,41 +63,85 @@ impl<Client: ClientInitializer<Config>, Config: Clone> ClientsMap<Client, Config
                 continue;
             }
 
-            let client = Client::init(spec, rt.clone())?;
-
-            clients_map.insert(spec.id, client);
+            let client = self.init_client(spec)?;
+            prepared.push((spec.id, client));
         }
 
         if let Some(spec) = &config.default {
             let default_id = id_seen.len();
-
-            let default_client = Client::init(
-                &SpecificClient {
-                    id: default_id,
-                    ip: None,
-                    spec: spec.clone(),
-                },
-                rt.clone(),
-            )?;
-
-            clients_map.insert(default_id, default_client);
+            let default_client = SpecificClient {
+                id: default_id,
+                ip: None,
+                spec: spec.clone(),
+            };
+            let client = self.init_client(&default_client)?;
+            prepared.push((default_id, client));
         }
 
-        if config.fail_on_empty && clients_map.is_empty() {
-            return Err(anyhow::anyhow!("Clients map is empty"));
+        if config.fail_on_empty && prepared.is_empty() {
+            return Err(anyhow!("Clients map is empty"));
         }
 
-        Ok(Self {
-            inner: Arc::new(clients_map),
-            _spec: PhantomData,
-        })
+        let mut guard = self.inner.write();
+        guard.clear();
+        for (id, client) in prepared {
+            guard.insert(id, client);
+        }
+
+        Ok(())
     }
 
-    pub fn get(&self, id: &usize) -> Option<&Client> {
-        self.inner.get(id)
+    fn init_client(&self, spec: &SpecificClient<Config>) -> Result<Arc<Client>> {
+        Client::init(spec, self.init_rt.clone()).map(Arc::new)
+    }
+
+    pub fn get(&self, id: &usize) -> Option<Arc<Client>> {
+        self.inner.read().get(id).cloned()
     }
 
     pub fn len(&self) -> usize {
-        self.inner.len()
+        self.inner.read().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn contains(&self, id: &usize) -> bool {
+        self.inner.read().contains_key(id)
+    }
+
+    pub fn ids(&self) -> Vec<usize> {
+        self.inner.read().keys().copied().collect()
+    }
+
+    pub fn upsert(&self, client: SpecificClient<Config>) -> Result<Arc<Client>> {
+        let id = client.id;
+        let client = self.init_client(&client)?;
+        let mut guard = self.inner.write();
+        guard.insert(id, client.clone());
+        Ok(client)
+    }
+
+    pub fn remove(&self, id: usize) -> Option<Arc<Client>> {
+        self.inner.write().remove(&id)
+    }
+
+    pub fn next_vacant_id(&self) -> usize {
+        let guard = self.inner.read();
+        let mut candidate = guard.len();
+        while guard.contains_key(&candidate) {
+            candidate += 1;
+        }
+        candidate
+    }
+
+    pub fn sole_entry_id(&self) -> Option<usize> {
+        let guard = self.inner.read();
+        if guard.len() == 1 {
+            guard.keys().next().copied()
+        } else {
+            None
+        }
     }
 }

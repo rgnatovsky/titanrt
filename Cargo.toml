@@ -23,6 +23,7 @@ serde_json = "1.0.142"
 tracing = "0.1.41"
 uuid = { version = "1.17.0", features = ["serde", "v4"] }
 ahash = "0.8.12"
+parking_lot = "0.12"
 signal-hook = "0.3.18"
 chrono = "0.4.41"
 regex = "1.11.1"
@@ -76,6 +77,7 @@ tonic_conn = ["tonic", "prost", "prost-types", "shared"]
 nats_bridge = ["async-nats"]
 shared = []
 websocket = ["tungstenite", "tokio-tungstenite", "shared"]
+
 
 
 

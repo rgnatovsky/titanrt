@@ -139,7 +139,7 @@ where
 
                 match command {
                     WebSocketCommand::Connect(connect_cfg) => {
-                        let Some(client) = ctx.cfg.get(&conn_id).cloned() else {
+                        let Some(client) = ctx.cfg.get(&conn_id) else {
                             push_event(
                                 &res_tx,
                                 conn_id,
@@ -150,6 +150,8 @@ where
                             );
                             continue;
                         };
+
+                        let client_cfg = client.as_ref().clone();
 
                         if let Some(handle) = connections.remove(&conn_id) {
                             let _ = handle.cmd_tx.send(WsTaskCommand::Disconnect);
@@ -166,7 +168,7 @@ where
                             let run_payload = payload_clone.clone();
                             if let Err(err) = run_session(
                                 conn_id,
-                                client,
+                                client_cfg,
                                 connect_cfg,
                                 cmd_rx,
                                 session_res_tx.clone(),
@@ -330,17 +332,13 @@ fn resolve_conn_id(
     cfg: &ClientsMap<WebSocketClient, WebSocketClientSpec>,
 ) -> Option<usize> {
     if let Some(id) = explicit {
-        if cfg.inner.contains_key(&id) {
+        if cfg.contains(&id) {
             return Some(id);
         }
         return None;
     }
 
-    if cfg.inner.len() == 1 {
-        cfg.inner.keys().next().copied()
-    } else {
-        None
-    }
+    cfg.sole_entry_id()
 }
 
 fn push_event(
@@ -661,3 +659,4 @@ async fn run_session(
 
     Ok(())
 }
+

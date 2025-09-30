@@ -79,9 +79,12 @@ pub fn start_server_stream(
                 req_id,
                 label,
                 payload.as_ref(),
-                GrpcEvent::from_status(GrpcEventKind::StreamConnected, Status::unavailable(format!(
-                    "[TonicStream - Runner] channel not ready with error: {e}",
-                ))),
+                GrpcEvent::from_status(
+                    GrpcEventKind::StreamConnected,
+                    Status::unavailable(format!(
+                        "channel not ready with error: {e}",
+                    )),
+                ),
             );
             let _ = lifecycle_tx.send(StreamLifecycle::Closed { stream_name });
             return;
@@ -101,7 +104,10 @@ pub fn start_server_stream(
                         req_id,
                         label,
                         payload.as_ref(),
-                        GrpcEvent::from_status(GrpcEventKind::StreamConnected, Status::deadline_exceeded("connect timeout")),
+                        GrpcEvent::from_status(
+                            GrpcEventKind::StreamConnected,
+                            Status::deadline_exceeded("connect timeout"),
+                        ),
                     );
                     let _ = lifecycle_tx.send(StreamLifecycle::Closed { stream_name });
                     return;
@@ -187,4 +193,3 @@ pub fn start_server_stream(
         handle,
     }
 }
-
