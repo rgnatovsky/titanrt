@@ -17,6 +17,13 @@ use crate::connector::features::websocket::connector::{
     WebSocketConnector, WebSocketConnectorConfig,
 };
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize, Copy, Eq, PartialEq)]
+pub enum CancelStreamsPolicy {
+    #[default]
+    Ignore,
+    OnInstanceDrop,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct CompositeConnectorConfig {
@@ -26,6 +33,8 @@ pub struct CompositeConnectorConfig {
     pub reqwest: Option<ReqwestConnectorConfig>,
     #[cfg(feature = "tonic_conn")]
     pub tonic: Option<TonicConnectorConfig>,
+    #[serde(default)]
+    pub cancel_streams_policy: CancelStreamsPolicy,
 }
 
 pub struct CompositeConnector {
@@ -47,11 +56,11 @@ impl CompositeConnector {
     ) -> Self {
         Self {
             #[cfg(feature = "websocket")]
-            websocket: ConnectorSlot::new(config.websocket),
+            websocket: ConnectorSlot::new(config.websocket, config.cancel_streams_policy),
             #[cfg(feature = "reqwest_conn")]
-            reqwest: ConnectorSlot::new(config.reqwest),
+            reqwest: ConnectorSlot::new(config.reqwest, config.cancel_streams_policy),
             #[cfg(feature = "tonic_conn")]
-            tonic: ConnectorSlot::new(config.tonic),
+            tonic: ConnectorSlot::new(config.tonic, config.cancel_streams_policy),
             cancel_token,
             reserved_core_ids,
         }
@@ -162,16 +171,18 @@ where
 {
     config: RwLock<Option<C::MainConfig>>,
     instance: Mutex<Option<C>>,
+    cancel_streams: CancelStreamsPolicy,
 }
 
 impl<C> ConnectorSlot<C>
 where
     C: BaseConnector,
 {
-    fn new(config: Option<C::MainConfig>) -> Self {
+    fn new(config: Option<C::MainConfig>, cancel_streams: CancelStreamsPolicy) -> Self {
         Self {
             config: RwLock::new(config),
             instance: Mutex::new(None),
+            cancel_streams,
         }
     }
 
@@ -189,8 +200,13 @@ where
 
     fn drop_instance(&self) {
         let mut guard = self.instance.lock();
-        if let Some(connector) = guard.as_ref() {
-            connector.cancel_token().cancel();
+        match self.cancel_streams {
+            CancelStreamsPolicy::OnInstanceDrop => {
+                if let Some(connector) = guard.as_mut() {
+                    connector.cancel_token().cancel();
+                }
+            }
+            CancelStreamsPolicy::Ignore => {}
         }
         *guard = None;
     }
@@ -258,8 +274,13 @@ where
     C: BaseConnector,
 {
     fn drop(&mut self) {
-        if let Some(connector) = self.instance.get_mut().take() {
-            connector.cancel_token().cancel();
+        match self.cancel_streams {
+            CancelStreamsPolicy::OnInstanceDrop => {
+                if let Some(connector) = self.instance.get_mut().take() {
+                    connector.cancel_token().cancel();
+                }
+            }
+            CancelStreamsPolicy::Ignore => return,
         }
     }
 }
