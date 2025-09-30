@@ -1,3 +1,9 @@
+#[cfg(any(
+    feature = "websocket",
+    feature = "reqwest_conn",
+    feature = "tonic_conn"
+))]
+pub mod composite;
 #[cfg(feature = "reqwest_conn")]
 pub mod reqwest;
 #[cfg(feature = "shared")]
