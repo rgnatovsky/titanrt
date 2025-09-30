@@ -17,7 +17,7 @@ impl<T> Kind for T where T: AsRef<str> + Display {}
 /// (venue/kind), how its channels are bounded, its CPU core
 /// affinity policy, and its initial health flag.
 #[must_use]
-pub trait StreamDescriptor: Debug + Clone + Send + 'static {
+pub trait StreamDescriptor<T>: Debug + Clone + Send + 'static {
     /// Human-readable venue identifier (e.g. "binance").
     fn venue(&self) -> impl Venue;
 
@@ -35,4 +35,6 @@ pub trait StreamDescriptor: Debug + Clone + Send + 'static {
 
     /// Initial health state of the stream.
     fn health_at_start(&self) -> bool;
+
+    fn custom_data(&self) -> Option<&T>;
 }

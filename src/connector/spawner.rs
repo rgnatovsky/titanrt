@@ -2,6 +2,7 @@ use crate::connector::hook::IntoHook;
 use crate::connector::{RuntimeCtx, Stream, StreamDescriptor, StreamRunner};
 use crate::io::base::{BaseTx, TxPairExt};
 use crate::utils::*;
+use std::fmt::Debug;
 use std::{sync::Arc, thread};
 use uuid::Uuid;
 use uuid::fmt::Simple;
@@ -31,13 +32,14 @@ impl<E> Default for EventTxType<E> {
 /// It allocates channels, state, health flag, applies core pinning policy,
 /// and starts the worker thread. The runner then executes its loop
 /// inside that thread with a [`RuntimeCtx`].
-pub trait StreamSpawner<D, E, R, S>
+pub trait StreamSpawner<D, E, R, S, T>
 where
-    Self: StreamRunner<D, E, R, S>,
-    D: StreamDescriptor,
+    Self: StreamRunner<D, E, R, S, T>,
+    D: StreamDescriptor<T>,
     S: StateMarker,
     E: BaseTx + TxPairExt,
     R: Reducer,
+    T: Debug + Clone + Send + 'static,
 {
     /// Build a human-readable thread name from descriptor and UUID.
     fn thread_name(&self, desc: &D, id: Simple) -> String {
@@ -61,7 +63,7 @@ where
         core_stats: Option<Arc<CoreStats>>,
     ) -> anyhow::Result<Stream<Self::ActionTx, Option<E::RxHalf>, S>>
     where
-        H: IntoHook<Self::RawEvent, E, R, S, D, Self::HookResult>,
+        H: IntoHook<Self::RawEvent, E, R, S, D, Self::HookResult, T>,
     {
         // Per-stream config
         let ctx = match self.build_config(&desc) {

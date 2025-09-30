@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use crate::connector::features::shared::rate_limiter::RateLimitConfig;
 use crate::connector::{Kind, StreamDescriptor, Venue};
 use crate::utils::CorePickPolicy;
@@ -49,7 +51,7 @@ use serde::Deserialize;
 /// - Limiter/actor shutdown does not deadlock callers; waits resolve early.
 ///
 /// This type is the public, documented entry point; the execution loop lives in the `StreamRunner` impl.
-pub struct ReqwestStreamDescriptor {
+pub struct ReqwestStreamDescriptor<T> {
     /// Maximum number of hook invocations to process in a single loop tick.
     /// Works as a soft batch size to prevent the hook from monopolizing the loop.
     pub max_hook_calls_at_once: usize,
@@ -73,9 +75,11 @@ pub struct ReqwestStreamDescriptor {
     /// Rate-limit configuration set applied by the RateLimitManager (GCRA buckets).
     /// Empty means "no limits".
     pub rate_limits: Vec<RateLimitConfig>,
+
+    pub custom_data: Option<T>,
 }
 
-impl ReqwestStreamDescriptor {
+impl<T> ReqwestStreamDescriptor<T> {
     pub fn new(
         max_hook_calls_at_once: Option<usize>,
         wait_async_tasks_us: Option<u64>,
@@ -83,6 +87,7 @@ impl ReqwestStreamDescriptor {
         max_pending_events: Option<usize>,
         core_pick_policy: Option<CorePickPolicy>,
         rate_limits: Option<Vec<RateLimitConfig>>,
+        custom_data: Option<T>,
     ) -> Self {
         let max_hook_calls_at_once = max_hook_calls_at_once.filter(|&x| x > 0).unwrap_or(10);
         let wait_async_tasks_us = wait_async_tasks_us.unwrap_or(100);
@@ -94,6 +99,7 @@ impl ReqwestStreamDescriptor {
             wait_async_tasks_us,
             core_pick_policy,
             rate_limits: rate_limits.unwrap_or_default(),
+            custom_data,
         }
     }
 
@@ -121,7 +127,7 @@ impl ReqwestStreamDescriptor {
     }
 }
 
-impl Default for ReqwestStreamDescriptor {
+impl<T> Default for ReqwestStreamDescriptor<T> {
     fn default() -> Self {
         Self {
             max_hook_calls_at_once: 10,
@@ -130,11 +136,12 @@ impl Default for ReqwestStreamDescriptor {
             max_pending_events: None,
             core_pick_policy: None,
             rate_limits: vec![],
+            custom_data: None,
         }
     }
 }
 
-impl StreamDescriptor for ReqwestStreamDescriptor {
+impl<T: Debug + Clone + Send + 'static> StreamDescriptor<T> for ReqwestStreamDescriptor<T> {
     fn venue(&self) -> impl Venue {
         "any"
     }
@@ -157,5 +164,9 @@ impl StreamDescriptor for ReqwestStreamDescriptor {
 
     fn health_at_start(&self) -> bool {
         false
+    }
+
+    fn custom_data(&self) -> Option<&T> {
+        self.custom_data.as_ref()
     }
 }

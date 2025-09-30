@@ -1,24 +1,28 @@
+use std::fmt::Debug;
+
 use serde::Deserialize;
 
 use crate::connector::{Kind, StreamDescriptor, Venue};
 use crate::utils::CorePickPolicy;
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct WebSocketStreamDescriptor {
+pub struct WebSocketStreamDescriptor<T> {
     pub max_hook_calls_at_once: usize,
     pub wait_async_tasks_us: u64,
     pub max_pending_actions: Option<usize>,
     pub max_pending_events: Option<usize>,
     pub core_pick_policy: Option<CorePickPolicy>,
+    pub custom_data: Option<T>,
 }
 
-impl WebSocketStreamDescriptor {
+impl<T> WebSocketStreamDescriptor<T> {
     pub fn new(
         max_hook_calls_at_once: Option<usize>,
         wait_async_tasks_us: Option<u64>,
         max_pending_actions: Option<usize>,
         max_pending_events: Option<usize>,
         core_pick_policy: Option<CorePickPolicy>,
+        custom_data: Option<T>,
     ) -> Self {
         Self {
             max_hook_calls_at_once: max_hook_calls_at_once.filter(|v| *v > 0).unwrap_or(32),
@@ -26,6 +30,7 @@ impl WebSocketStreamDescriptor {
             max_pending_actions,
             max_pending_events,
             core_pick_policy,
+            custom_data,
         }
     }
 
@@ -36,6 +41,7 @@ impl WebSocketStreamDescriptor {
             max_pending_actions: Some(512),
             max_pending_events: Some(512),
             core_pick_policy: None,
+            custom_data: None,
         }
     }
 
@@ -46,11 +52,12 @@ impl WebSocketStreamDescriptor {
             max_pending_actions: Some(2048),
             max_pending_events: Some(2048),
             core_pick_policy: None,
+            custom_data: None,
         }
     }
 }
 
-impl Default for WebSocketStreamDescriptor {
+impl<T> Default for WebSocketStreamDescriptor<T> {
     fn default() -> Self {
         Self {
             max_hook_calls_at_once: 32,
@@ -58,11 +65,12 @@ impl Default for WebSocketStreamDescriptor {
             max_pending_actions: None,
             max_pending_events: None,
             core_pick_policy: None,
+            custom_data: None,
         }
     }
 }
 
-impl StreamDescriptor for WebSocketStreamDescriptor {
+impl<T: Debug + Clone + Send + 'static> StreamDescriptor<T> for WebSocketStreamDescriptor<T> {
     fn venue(&self) -> impl Venue {
         "any"
     }
@@ -85,5 +93,9 @@ impl StreamDescriptor for WebSocketStreamDescriptor {
 
     fn health_at_start(&self) -> bool {
         false
+    }
+
+    fn custom_data(&self) -> Option<&T> {
+        self.custom_data.as_ref()
     }
 }

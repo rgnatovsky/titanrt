@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::time::Duration;
 
 use crate::connector::hook::Hook;
@@ -53,43 +54,49 @@ enum WsTaskCommand {
     Disconnect,
 }
 
-impl<E, R, S> StreamSpawner<WebSocketStreamDescriptor, E, R, S> for WebSocketConnector
+impl<E, R, S, T> StreamSpawner<WebSocketStreamDescriptor<T>, E, R, S, T> for WebSocketConnector
 where
-    Self: StreamRunner<WebSocketStreamDescriptor, E, R, S>,
+    Self: StreamRunner<WebSocketStreamDescriptor<T>, E, R, S, T>,
     E: BaseRx + TxPairExt,
     R: Reducer,
     S: StateMarker,
+    T: Debug + Clone + Send + 'static,
 {
 }
 
-impl<E, R, S> StreamRunner<WebSocketStreamDescriptor, E, R, S> for WebSocketConnector
+impl<E, R, S, T> StreamRunner<WebSocketStreamDescriptor<T>, E, R, S, T> for WebSocketConnector
 where
     E: BaseRx + TxPairExt,
     R: Reducer,
     S: StateMarker,
+    T: Debug + Clone + Send + 'static,
 {
     type Config = ClientsMap<WebSocketClient, WebSocketClientSpec>;
     type ActionTx = RingSender<StreamAction<WebSocketCommand>>;
     type RawEvent = StreamEvent<WebSocketEvent>;
     type HookResult = ();
 
-    fn build_config(&mut self, _desc: &WebSocketStreamDescriptor) -> anyhow::Result<Self::Config> {
+    fn build_config(
+        &mut self,
+        _desc: &WebSocketStreamDescriptor<T>,
+    ) -> anyhow::Result<Self::Config> {
         Ok(self.clients_map())
     }
 
     fn run<H>(
         mut ctx: RuntimeCtx<
             ClientsMap<WebSocketClient, WebSocketClientSpec>,
-            WebSocketStreamDescriptor,
+            WebSocketStreamDescriptor<T>,
             RingSender<StreamAction<WebSocketCommand>>,
             E,
             R,
             S,
+            T,
         >,
         hook: H,
     ) -> StreamResult<()>
     where
-        H: IntoHook<StreamEvent<WebSocketEvent>, E, R, S, WebSocketStreamDescriptor, ()>,
+        H: IntoHook<StreamEvent<WebSocketEvent>, E, R, S, WebSocketStreamDescriptor<T>, (), T>,
     {
         let mut hook = hook.into_hook();
         let wait_async_tasks = Duration::from_micros(ctx.desc.wait_async_tasks_us);
@@ -659,4 +666,3 @@ async fn run_session(
 
     Ok(())
 }
-

@@ -253,7 +253,8 @@ mod tests {
             RingSender<()>,
             NullReducer,
             NullState,
-            TonicDescriptor,
+            TonicDescriptor<()>,
+            ()
         >,
     ) {
         tracing::debug!("Geyser hook: event={:?}", args.raw);
@@ -326,7 +327,8 @@ mod tests {
             RingSender<()>,
             NullReducer,
             NullState,
-            TonicDescriptor,
+            TonicDescriptor<()>,
+            ()
         >,
     ) {
         if let Ok(m) = args.raw.inner().decode_as::<DummyMessage>() {

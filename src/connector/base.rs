@@ -3,7 +3,7 @@ use crate::connector::{EventTxType, Stream, StreamDescriptor, StreamSpawner};
 use crate::io::base::{BaseTx, TxPairExt};
 use crate::utils::*;
 use serde::Deserialize;
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::sync::Arc;
 
 /// Connector facade owned by the model.
@@ -49,21 +49,22 @@ pub trait BaseConnector: Sized + Send + 'static {
     /// - `desc`: stream descriptor (venue/kind/bounds/core policy).
     /// - `hook`: translation callback from raw messages to typed events.
     /// - Returns a `Stream` exposing action TX, optional event RX, health, cancel, and join.
-    fn spawn_stream<D, E, R, S, H>(
+    fn spawn_stream<D, E, R, S, H, T>(
         &mut self,
         desc: D,
         event_tx_type: EventTxType<E>,
         hook: H,
     ) -> anyhow::Result<Stream<Self::ActionTx, Option<E::RxHalf>, S>>
     where
-        Self: StreamSpawner<D, E, R, S>,
-        D: StreamDescriptor,
+        Self: StreamSpawner<D, E, R, S, T>,
+        D: StreamDescriptor<T>,
         S: StateMarker,
         E: BaseTx + TxPairExt,
-        H: IntoHook<Self::RawEvent, E, R, S, D, Self::HookResult>,
+        H: IntoHook<Self::RawEvent, E, R, S, D, Self::HookResult, T>,
         R: Reducer,
+        T: Debug + Clone + Send + 'static,
     {
-        <Self as StreamSpawner<D, E, R, S>>::spawn(
+        <Self as StreamSpawner<D, E, R, S, T>>::spawn(
             self,
             desc,
             event_tx_type,

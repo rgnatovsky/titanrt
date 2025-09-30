@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use crate::connector::features::shared::rate_limiter::RateLimitConfig;
 use crate::connector::{Kind, StreamDescriptor, Venue};
 use crate::utils::CorePickPolicy;
@@ -8,7 +10,7 @@ const fn default_outbound_buffer() -> usize {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct TonicDescriptor {
+pub struct TonicDescriptor<T> {
     /// Maximum number of hook calls at once.
     pub max_hook_calls_at_once: usize,
     /// Delay between async tasks.
@@ -29,9 +31,10 @@ pub struct TonicDescriptor {
     /// Buffer for outbound streaming messages (client/bidi).
     #[serde(default = "default_outbound_buffer")]
     pub outbound_buffer: usize,
+    pub custom_data: Option<T>,
 }
 
-impl TonicDescriptor {
+impl<T> TonicDescriptor<T> {
     pub fn new(
         max_hook_calls_at_once: Option<usize>,
         wait_async_tasks_us: Option<u64>,
@@ -42,6 +45,7 @@ impl TonicDescriptor {
         max_decoding_message_size: Option<usize>,
         max_encoding_message_size: Option<usize>,
         outbound_buffer: Option<usize>,
+        custom_data: Option<T>,
     ) -> Self {
         let mut descriptor = Self::default();
         descriptor.max_hook_calls_at_once = max_hook_calls_at_once.filter(|&x| x > 0).unwrap_or(10);
@@ -53,6 +57,7 @@ impl TonicDescriptor {
         descriptor.max_decoding_message_size = max_decoding_message_size;
         descriptor.max_encoding_message_size = max_encoding_message_size;
         descriptor.outbound_buffer = outbound_buffer.unwrap_or(default_outbound_buffer());
+        descriptor.custom_data = custom_data;
         descriptor
     }
 
@@ -75,7 +80,7 @@ impl TonicDescriptor {
     }
 }
 
-impl Default for TonicDescriptor {
+impl<T> Default for TonicDescriptor<T> {
     fn default() -> Self {
         Self {
             max_hook_calls_at_once: 10,
@@ -87,11 +92,12 @@ impl Default for TonicDescriptor {
             max_decoding_message_size: None,
             max_encoding_message_size: None,
             outbound_buffer: default_outbound_buffer(),
+            custom_data: None,
         }
     }
 }
 
-impl StreamDescriptor for TonicDescriptor {
+impl<T: Debug + Clone + Send + 'static> StreamDescriptor<T> for TonicDescriptor<T> {
     fn venue(&self) -> impl Venue {
         "any"
     }
@@ -114,5 +120,9 @@ impl StreamDescriptor for TonicDescriptor {
 
     fn health_at_start(&self) -> bool {
         false
+    }
+
+    fn custom_data(&self) -> Option<&T> {
+        self.custom_data.as_ref()
     }
 }

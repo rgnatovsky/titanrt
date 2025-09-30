@@ -14,6 +14,7 @@ use crate::prelude::{BaseRx, TxPairExt};
 use crate::utils::{Reducer, StateMarker};
 use anyhow::anyhow;
 use crossbeam::channel::unbounded;
+use std::fmt::Debug;
 use std::rc::Rc;
 use std::time::Duration;
 use tokio::runtime::Builder;
@@ -21,42 +22,45 @@ use tokio::sync::Mutex;
 use tokio::task::LocalSet;
 use tokio::time::sleep;
 
-impl<E, R, S> StreamSpawner<ReqwestStreamDescriptor, E, R, S> for ReqwestConnector
+impl<E, R, S, T> StreamSpawner<ReqwestStreamDescriptor<T>, E, R, S, T> for ReqwestConnector
 where
     E: TxPairExt,
     S: StateMarker,
     R: Reducer,
+    T: Debug + Clone + Send + 'static,
 {
 }
 
-impl<E, R, S> StreamRunner<ReqwestStreamDescriptor, E, R, S> for ReqwestConnector
+impl<E, R, S, T> StreamRunner<ReqwestStreamDescriptor<T>, E, R, S, T> for ReqwestConnector
 where
     E: TxPairExt,
     S: StateMarker,
     R: Reducer,
+    T: Debug + Clone + Send + 'static,
 {
     type Config = ClientsMap<ReqwestClient, ReqwestClientSpec>;
     type ActionTx = RingSender<StreamAction<ReqwestAction>>;
     type RawEvent = StreamEvent<ReqwestEvent>;
     type HookResult = ();
 
-    fn build_config(&mut self, _desc: &ReqwestStreamDescriptor) -> anyhow::Result<Self::Config> {
+    fn build_config(&mut self, _desc: &ReqwestStreamDescriptor<T>) -> anyhow::Result<Self::Config> {
         Ok(self.clients_map())
     }
 
     fn run<H>(
         mut ctx: RuntimeCtx<
             ClientsMap<ReqwestClient, ReqwestClientSpec>,
-            ReqwestStreamDescriptor,
+            ReqwestStreamDescriptor<T>,
             RingSender<StreamAction<ReqwestAction>>,
             E,
             R,
             S,
+            T,
         >,
         hook: H,
     ) -> StreamResult<()>
     where
-        H: IntoHook<StreamEvent<ReqwestEvent>, E, R, S, ReqwestStreamDescriptor, ()>,
+        H: IntoHook<StreamEvent<ReqwestEvent>, E, R, S, ReqwestStreamDescriptor<T>, (), T>,
         E: TxPairExt,
         S: StateMarker,
     {

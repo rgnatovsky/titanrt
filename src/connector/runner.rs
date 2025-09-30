@@ -10,10 +10,10 @@ use std::sync::Arc;
 /// Bundles together the descriptor, config, typed channels,
 /// shared state, cancel token, and health flag. This is the
 /// handle a [`StreamRunner`] implementation uses inside `run()`.
-pub struct RuntimeCtx<C, D, A, E, R, S>
+pub struct RuntimeCtx<C, D, A, E, R, S, T>
 where
     C: Send + 'static,
-    D: StreamDescriptor,
+    D: StreamDescriptor<T>,
     A: BaseTx + TxPairExt,
     S: StateMarker,
     E: BaseTx,
@@ -35,12 +35,13 @@ where
     pub cancel: CancelToken,
     /// Health flag of this worker.
     pub health: HealthFlag,
+    _marker: std::marker::PhantomData<T>,
 }
 
-impl<C, D, A, E, R, S> RuntimeCtx<C, D, A, E, R, S>
+impl<C, D, A, E, R, S, T> RuntimeCtx<C, D, A, E, R, S, T>
 where
     C: Send + 'static,
-    D: StreamDescriptor,
+    D: StreamDescriptor<T>,
     A: BaseTx + TxPairExt,
     S: StateMarker,
     E: BaseTx,
@@ -67,6 +68,7 @@ where
             state,
             cancel,
             health,
+            _marker: std::marker::PhantomData,
         }
     }
 }
@@ -75,9 +77,9 @@ where
 ///
 /// A `StreamRunner` defines how to build a per-stream config
 /// and how to run the worker loop given a [`RuntimeCtx`].
-pub trait StreamRunner<D, E, R, S>: Sized + Send + 'static
+pub trait StreamRunner<D, E, R, S, T>: Sized + Send + 'static
 where
-    D: StreamDescriptor,
+    D: StreamDescriptor<T>,
     S: StateMarker,
     E: BaseTx,
     R: Reducer,
@@ -96,9 +98,9 @@ where
 
     /// Run the worker loop with the given context and event hook.
     fn run<H>(
-        ctx: RuntimeCtx<Self::Config, D, Self::ActionTx, E, R, S>,
+        ctx: RuntimeCtx<Self::Config, D, Self::ActionTx, E, R, S, T>,
         hook: H,
     ) -> StreamResult<()>
     where
-        H: IntoHook<Self::RawEvent, E, R, S, D, Self::HookResult>;
+        H: IntoHook<Self::RawEvent, E, R, S, D, Self::HookResult, T>;
 }

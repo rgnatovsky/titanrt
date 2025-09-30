@@ -23,6 +23,7 @@ use crate::utils::{Reducer, StateMarker};
 
 use crossbeam::channel::unbounded;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::rc::Rc;
 use tokio::runtime::Runtime;
 
@@ -34,42 +35,45 @@ use tokio::time::{self, sleep};
 use tonic::Status;
 use tonic::client::Grpc;
 
-impl<E, R, S> StreamSpawner<TonicDescriptor, E, R, S> for TonicConnector
+impl<E, R, S, T> StreamSpawner<TonicDescriptor<T>, E, R, S, T> for TonicConnector
 where
     E: TxPairExt,
     S: StateMarker,
     R: Reducer,
+       T: Debug + Clone + Send + 'static,
 {
 }
 
-impl<E, R, S> StreamRunner<TonicDescriptor, E, R, S> for TonicConnector
+impl<E, R, S, T> StreamRunner<TonicDescriptor<T>, E, R, S, T> for TonicConnector
 where
     E: TxPairExt,
     S: StateMarker,
     R: Reducer,
+    T: Debug + Clone + Send + 'static,
 {
     type Config = (ClientsMap<TonicClient, TonicChannelSpec>, Arc<Runtime>);
     type ActionTx = RingSender<StreamAction<GrpcCommand>>;
     type RawEvent = StreamEvent<GrpcEvent>;
     type HookResult = ();
 
-    fn build_config(&mut self, _desc: &TonicDescriptor) -> anyhow::Result<Self::Config> {
+    fn build_config(&mut self, _desc: &TonicDescriptor<T>) -> anyhow::Result<Self::Config> {
         Ok((self.clients_map(), self.rt_tokio()))
     }
 
     fn run<H>(
         mut ctx: RuntimeCtx<
             (ClientsMap<TonicClient, TonicChannelSpec>, Arc<Runtime>),
-            TonicDescriptor,
+            TonicDescriptor<T>,
             RingSender<StreamAction<GrpcCommand>>,
             E,
             R,
             S,
+            T,
         >,
         hook: H,
     ) -> StreamResult<()>
     where
-        H: IntoHook<StreamEvent<GrpcEvent>, E, R, S, TonicDescriptor, ()>,
+        H: IntoHook<StreamEvent<GrpcEvent>, E, R, S, TonicDescriptor<T>, (), T>,
         E: TxPairExt,
         S: StateMarker,
     {
