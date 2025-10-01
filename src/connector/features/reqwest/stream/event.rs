@@ -5,7 +5,7 @@ use reqwest::{Response, StatusCode};
 
 use crate::connector::features::shared::events::StreamEventInner;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ReqwestEvent {
     status: StatusCode,
     err_msg: Option<String>,
