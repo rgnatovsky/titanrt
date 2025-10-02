@@ -3,16 +3,16 @@ use std::fmt::Debug;
 use std::rc::Rc;
 use std::time::Duration;
 
-use ahash::AHashMap;
 use crate::connector::hook::Hook;
+use ahash::AHashMap;
 use anyhow::anyhow;
 use bytes::Bytes;
 use crossbeam::channel::{Sender, unbounded};
 use futures::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio::runtime::Builder;
-use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::sync::Mutex;
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::task::{LocalSet, yield_now};
 use tokio::time::{sleep, timeout};
 use tokio_tungstenite::connect_async_with_config;
@@ -60,7 +60,7 @@ enum WsTaskCommand {
 impl<E, R, S, T> StreamSpawner<WebSocketStreamDescriptor<T>, E, R, S, T> for WebSocketConnector
 where
     Self: StreamRunner<WebSocketStreamDescriptor<T>, E, R, S, T>,
-    E: BaseRx + TxPairExt,
+    E: TxPairExt,
     R: Reducer,
     S: StateMarker,
     T: Debug + Clone + Send + 'static,
@@ -69,7 +69,7 @@ where
 
 impl<E, R, S, T> StreamRunner<WebSocketStreamDescriptor<T>, E, R, S, T> for WebSocketConnector
 where
-    E: BaseRx + TxPairExt,
+    E: TxPairExt,
     R: Reducer,
     S: StateMarker,
     T: Debug + Clone + Send + 'static,
