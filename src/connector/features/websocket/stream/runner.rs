@@ -1,8 +1,9 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::fmt::Debug;
+use std::rc::Rc;
 use std::time::Duration;
 
+use ahash::AHashMap;
 use crate::connector::hook::Hook;
 use anyhow::anyhow;
 use bytes::Bytes;
@@ -11,6 +12,7 @@ use futures::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use tokio::sync::Mutex;
 use tokio::task::{LocalSet, yield_now};
 use tokio::time::{sleep, timeout};
 use tokio_tungstenite::connect_async_with_config;
@@ -28,6 +30,7 @@ use crate::connector::errors::{StreamError, StreamResult};
 use crate::connector::features::shared::actions::StreamAction;
 use crate::connector::features::shared::clients_map::ClientsMap;
 use crate::connector::features::shared::events::StreamEvent;
+use crate::connector::features::shared::rate_limiter::RateLimitManager;
 use crate::connector::features::websocket::client::{WebSocketClient, WebSocketClientSpec};
 use crate::connector::features::websocket::connector::WebSocketConnector;
 use crate::connector::features::websocket::stream::actions::{
@@ -100,8 +103,12 @@ where
     {
         let mut hook = hook.into_hook();
         let wait_async_tasks = Duration::from_micros(ctx.desc.wait_async_tasks_us);
-        let mut connections: HashMap<usize, ConnectionHandle> = HashMap::new();
+        let mut connections: AHashMap<usize, ConnectionHandle> = AHashMap::new();
         let (res_tx, res_rx) = unbounded::<StreamEvent<WebSocketEvent>>();
+
+        let rl_manager = Rc::new(Mutex::new(RateLimitManager::new(
+            ctx.desc.rate_limits.clone(),
+        )));
 
         let rt = Builder::new_current_thread()
             .enable_io()
@@ -201,16 +208,44 @@ where
                     }
                     WebSocketCommand::Send(message) => match connections.get(&conn_id) {
                         Some(handle) => {
-                            if handle.cmd_tx.send(WsTaskCommand::Send(message)).is_err() {
-                                push_event(
-                                    &res_tx,
-                                    conn_id,
-                                    req_id,
-                                    label.as_ref(),
-                                    payload.as_ref(),
-                                    WebSocketEvent::error("connection is not available"),
-                                );
-                            }
+                            let cmd_tx = handle.cmd_tx.clone();
+                            let rl_manager_clone = if action.rl_ctx().is_some() {
+                                Some(rl_manager.clone())
+                            } else {
+                                None
+                            };
+                            let rl_ctx = action.rl_ctx().cloned();
+                            let rl_weight = action.rl_weight();
+                            let res_tx_clone = res_tx.clone();
+                            let label_clone = label.clone();
+                            let payload_clone = payload.clone();
+
+                            local.spawn_local(async move {
+                                if let Some(rl_mgr) = rl_manager_clone {
+                                    if let Some(ctx) = rl_ctx.as_ref() {
+                                        let plan = {
+                                            let mut mgr = rl_mgr.lock().await;
+                                            mgr.plan(ctx, rl_weight)
+                                        };
+                                        if let Some(plan) = plan {
+                                            for (bucket, weight) in plan {
+                                                bucket.wait(weight).await;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if cmd_tx.send(WsTaskCommand::Send(message)).is_err() {
+                                    push_event(
+                                        &res_tx_clone,
+                                        conn_id,
+                                        req_id,
+                                        label_clone.as_ref(),
+                                        payload_clone.as_ref(),
+                                        WebSocketEvent::error("connection is not available"),
+                                    );
+                                }
+                            });
                         }
                         None => push_event(
                             &res_tx,
@@ -223,16 +258,44 @@ where
                     },
                     WebSocketCommand::Ping(bytes) => {
                         if let Some(handle) = connections.get(&conn_id) {
-                            if handle.cmd_tx.send(WsTaskCommand::Ping(bytes)).is_err() {
-                                push_event(
-                                    &res_tx,
-                                    conn_id,
-                                    req_id,
-                                    label.as_ref(),
-                                    payload.as_ref(),
-                                    WebSocketEvent::error("connection is not available"),
-                                );
-                            }
+                            let cmd_tx = handle.cmd_tx.clone();
+                            let rl_manager_clone = if action.rl_ctx().is_some() {
+                                Some(rl_manager.clone())
+                            } else {
+                                None
+                            };
+                            let rl_ctx = action.rl_ctx().cloned();
+                            let rl_weight = action.rl_weight();
+                            let res_tx_clone = res_tx.clone();
+                            let label_clone = label.clone();
+                            let payload_clone = payload.clone();
+
+                            local.spawn_local(async move {
+                                if let Some(rl_mgr) = rl_manager_clone {
+                                    if let Some(ctx) = rl_ctx.as_ref() {
+                                        let plan = {
+                                            let mut mgr = rl_mgr.lock().await;
+                                            mgr.plan(ctx, rl_weight)
+                                        };
+                                        if let Some(plan) = plan {
+                                            for (bucket, weight) in plan {
+                                                bucket.wait(weight).await;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if cmd_tx.send(WsTaskCommand::Ping(bytes)).is_err() {
+                                    push_event(
+                                        &res_tx_clone,
+                                        conn_id,
+                                        req_id,
+                                        label_clone.as_ref(),
+                                        payload_clone.as_ref(),
+                                        WebSocketEvent::error("connection is not available"),
+                                    );
+                                }
+                            });
                         } else {
                             push_event(
                                 &res_tx,
@@ -246,16 +309,44 @@ where
                     }
                     WebSocketCommand::Pong(bytes) => {
                         if let Some(handle) = connections.get(&conn_id) {
-                            if handle.cmd_tx.send(WsTaskCommand::Pong(bytes)).is_err() {
-                                push_event(
-                                    &res_tx,
-                                    conn_id,
-                                    req_id,
-                                    label.as_ref(),
-                                    payload.as_ref(),
-                                    WebSocketEvent::error("connection is not available"),
-                                );
-                            }
+                            let cmd_tx = handle.cmd_tx.clone();
+                            let rl_manager_clone = if action.rl_ctx().is_some() {
+                                Some(rl_manager.clone())
+                            } else {
+                                None
+                            };
+                            let rl_ctx = action.rl_ctx().cloned();
+                            let rl_weight = action.rl_weight();
+                            let res_tx_clone = res_tx.clone();
+                            let label_clone = label.clone();
+                            let payload_clone = payload.clone();
+
+                            local.spawn_local(async move {
+                                if let Some(rl_mgr) = rl_manager_clone {
+                                    if let Some(ctx) = rl_ctx.as_ref() {
+                                        let plan = {
+                                            let mut mgr = rl_mgr.lock().await;
+                                            mgr.plan(ctx, rl_weight)
+                                        };
+                                        if let Some(plan) = plan {
+                                            for (bucket, weight) in plan {
+                                                bucket.wait(weight).await;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if cmd_tx.send(WsTaskCommand::Pong(bytes)).is_err() {
+                                    push_event(
+                                        &res_tx_clone,
+                                        conn_id,
+                                        req_id,
+                                        label_clone.as_ref(),
+                                        payload_clone.as_ref(),
+                                        WebSocketEvent::error("connection is not available"),
+                                    );
+                                }
+                            });
                         } else {
                             push_event(
                                 &res_tx,
@@ -269,16 +360,44 @@ where
                     }
                     WebSocketCommand::Close(close_cfg) => {
                         if let Some(handle) = connections.get(&conn_id) {
-                            if handle.cmd_tx.send(WsTaskCommand::Close(close_cfg)).is_err() {
-                                push_event(
-                                    &res_tx,
-                                    conn_id,
-                                    req_id,
-                                    label.as_ref(),
-                                    payload.as_ref(),
-                                    WebSocketEvent::error("connection is not available"),
-                                );
-                            }
+                            let cmd_tx = handle.cmd_tx.clone();
+                            let rl_manager_clone = if action.rl_ctx().is_some() {
+                                Some(rl_manager.clone())
+                            } else {
+                                None
+                            };
+                            let rl_ctx = action.rl_ctx().cloned();
+                            let rl_weight = action.rl_weight();
+                            let res_tx_clone = res_tx.clone();
+                            let label_clone = label.clone();
+                            let payload_clone = payload.clone();
+
+                            local.spawn_local(async move {
+                                if let Some(rl_mgr) = rl_manager_clone {
+                                    if let Some(ctx) = rl_ctx.as_ref() {
+                                        let plan = {
+                                            let mut mgr = rl_mgr.lock().await;
+                                            mgr.plan(ctx, rl_weight)
+                                        };
+                                        if let Some(plan) = plan {
+                                            for (bucket, weight) in plan {
+                                                bucket.wait(weight).await;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if cmd_tx.send(WsTaskCommand::Close(close_cfg)).is_err() {
+                                    push_event(
+                                        &res_tx_clone,
+                                        conn_id,
+                                        req_id,
+                                        label_clone.as_ref(),
+                                        payload_clone.as_ref(),
+                                        WebSocketEvent::error("connection is not available"),
+                                    );
+                                }
+                            });
                         } else {
                             push_event(
                                 &res_tx,

@@ -3,6 +3,7 @@ use std::fmt::Debug;
 use serde::Deserialize;
 
 use crate::connector::{Kind, StreamDescriptor, Venue};
+use crate::connector::features::shared::rate_limiter::RateLimitConfig;
 use crate::utils::CorePickPolicy;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -12,6 +13,8 @@ pub struct WebSocketStreamDescriptor<T> {
     pub max_pending_actions: Option<usize>,
     pub max_pending_events: Option<usize>,
     pub core_pick_policy: Option<CorePickPolicy>,
+    #[serde(default)]
+    pub rate_limits: Vec<RateLimitConfig>,
     pub custom_data: Option<T>,
 }
 
@@ -30,6 +33,7 @@ impl<T> WebSocketStreamDescriptor<T> {
             max_pending_actions,
             max_pending_events,
             core_pick_policy,
+            rate_limits: Vec::new(),
             custom_data,
         }
     }
@@ -41,6 +45,7 @@ impl<T> WebSocketStreamDescriptor<T> {
             max_pending_actions: Some(512),
             max_pending_events: Some(512),
             core_pick_policy: None,
+            rate_limits: Vec::new(),
             custom_data: None,
         }
     }
@@ -52,6 +57,7 @@ impl<T> WebSocketStreamDescriptor<T> {
             max_pending_actions: Some(2048),
             max_pending_events: Some(2048),
             core_pick_policy: None,
+            rate_limits: Vec::new(),
             custom_data: None,
         }
     }
@@ -65,6 +71,7 @@ impl<T> Default for WebSocketStreamDescriptor<T> {
             max_pending_actions: None,
             max_pending_events: None,
             core_pick_policy: None,
+            rate_limits: Vec::new(),
             custom_data: None,
         }
     }
