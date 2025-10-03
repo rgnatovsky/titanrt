@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::time::Duration;
 
 use bytes::Bytes;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -119,7 +119,7 @@ impl<Inner> StreamActionBuilder<Inner> {
 
 /// StreamAction holds a spec + optional metadata.
 /// Поля сделаны приватными — используйте геттеры.
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct StreamAction<Inner> {
     inner: Option<Inner>,
     conn_id: Option<usize>,
