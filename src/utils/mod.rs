@@ -13,3 +13,5 @@ pub mod logger;
 pub mod params_io;
 mod state;
 pub mod time;
+pub use shared_str::SharedStr;
+mod shared_str;
