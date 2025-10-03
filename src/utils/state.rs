@@ -15,6 +15,10 @@ impl Reducer for NullReducer {}
 
 /// Marker trait for state snapshots stored in [`StateCell`].
 /// Must be `Send + Sync + Default + 'static`.
+///
+/// States can optionally support internal mutation without replacing
+/// the entire snapshot by implementing mutation methods that work
+/// with interior mutability (e.g., via `RwLock`, `Mutex`, atomics).
 pub trait StateMarker: Default + Sync + Send + 'static {}
 
 /// Empty state marker for cases where no state is needed.
@@ -29,6 +33,48 @@ impl StateMarker for NullState {}
 ///
 /// Readers can cheaply peek or check if the snapshot changed
 /// without blocking writers.
+///
+/// # Internal Mutation
+///
+/// States can implement internal mutability (via `RwLock`, `Mutex`, atomics)
+/// and use [`mutate_internal`](Self::mutate_internal) to modify data without
+/// replacing the entire snapshot. The sequence counter still increments,
+/// notifying observers of changes.
+///
+/// # Example: Full Snapshot Replacement
+/// ```ignore
+/// #[derive(Default)]
+/// struct Config {
+///     timeout: u64,
+/// }
+/// impl StateMarker for Config {}
+///
+/// let cell = StateCell::new(Config { timeout: 100 });
+/// cell.publish(Config { timeout: 200 }); // Replace entire state
+/// ```
+///
+/// # Example: Internal Mutation
+/// ```ignore
+/// use std::sync::{Arc, RwLock};
+///
+/// struct Metrics {
+///     counters: Arc<RwLock<HashMap<String, u64>>>,
+/// }
+/// impl StateMarker for Metrics {}
+///
+/// let cell = StateCell::new(Metrics { ... });
+///
+/// // Modify without cloning the entire state
+/// cell.mutate_internal(|state| {
+///     let mut counters = state.counters.write().unwrap();
+///     *counters.entry("requests".into()).or_insert(0) += 1;
+/// });
+///
+/// // Observers detect the change via seq
+/// if cell.changed_since(last_seq) {
+///     println!("Metrics updated!");
+/// }
+/// ```
 #[derive(Debug)]
 pub struct StateCell<State: StateMarker> {
     snap: ArcSwap<State>,
@@ -73,7 +119,23 @@ impl<S: StateMarker> StateCell<S> {
         self.seq.fetch_add(1, Ordering::Release);
     }
 
-    /// Load a guard to the current snapshot (cheap, lock-free).
+    /// Provides a temporary borrow of the object inside.
+    ///
+    /// This returns a proxy object allowing access to the thing held inside. However, there's
+    /// only limited amount of possible cheap proxies in existence for each thread ‒ if more are
+    /// created, it falls back to equivalent of [`load`](#method.load) internally.
+    ///
+    /// This is therefore a good choice to use for eg. searching a data structure or juggling the
+    /// pointers around a bit, but not as something to store in larger amounts. The rule of thumb
+    /// is this is suited for local variables on stack, but not in long-living data structures.
+    ///
+    /// # Consistency
+    ///
+    /// In case multiple related operations are to be done on the loaded value, it is generally
+    /// recommended to call `peek` just once and keep the result over calling it multiple times.
+    /// First, keeping it is usually faster. But more importantly, the value can change between the
+    /// calls to peek, returning different objects, which could lead to logical inconsistency.
+    /// Keeping the result makes sure the same object is used.
     #[inline]
     pub fn peek(&self) -> arc_swap::Guard<Arc<S>> {
         self.snap.load()
@@ -128,5 +190,61 @@ impl<S: StateMarker> StateCell<S> {
     #[inline]
     pub fn changed_since(&self, last: u64) -> bool {
         self.seq() != last
+    }
+
+    /// Modify internal state without replacing the snapshot.
+    ///
+    /// This method allows calling a closure that can mutate the state's
+    /// internal data (e.g., via `RwLock`, `Mutex`, or atomics) without
+    /// creating a new Arc snapshot. The sequence counter is incremented
+    /// to notify observers of the change.
+    ///
+    /// # Example
+    /// ```ignore
+    /// // State with internal mutability
+    /// struct MyState {
+    ///     data: Arc<RwLock<Vec<String>>>,
+    /// }
+    ///
+    /// let cell = StateCell::new(MyState { ... });
+    ///
+    /// // Modify without replacing snapshot
+    /// cell.mutate_internal(|state| {
+    ///     let mut data = state.data.write().unwrap();
+    ///     data.push("new item".to_string());
+    /// });
+    /// ```
+    #[inline]
+    pub fn mutate_internal<F>(&self, f: F)
+    where
+        F: FnOnce(&S),
+    {
+        let guard = self.snap.load();
+        f(&*guard);
+        self.seq.fetch_add(1, Ordering::Release);
+    }
+
+    /// Modify internal state and return a result.
+    ///
+    /// Similar to [`mutate_internal`](Self::mutate_internal), but allows
+    /// the closure to return a value.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let count = cell.mutate_internal_with(|state| {
+    ///     let mut data = state.data.write().unwrap();
+    ///     data.push("item".to_string());
+    ///     data.len()
+    /// });
+    /// ```
+    #[inline]
+    pub fn mutate_internal_with<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&S) -> R,
+    {
+        let guard = self.snap.load();
+        let result = f(&*guard);
+        self.seq.fetch_add(1, Ordering::Release);
+        result
     }
 }
