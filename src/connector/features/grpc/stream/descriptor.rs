@@ -10,7 +10,7 @@ const fn default_outbound_buffer() -> usize {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct TonicDescriptor<T> {
+pub struct GrpcDescriptor<T> {
     /// Maximum number of hook calls at once.
     pub max_hook_calls_at_once: usize,
     /// Delay between async tasks.
@@ -31,10 +31,11 @@ pub struct TonicDescriptor<T> {
     /// Buffer for outbound streaming messages (client/bidi).
     #[serde(default = "default_outbound_buffer")]
     pub outbound_buffer: usize,
-    pub custom_data: Option<T>,
+    /// User-defined context passed to the hook.
+    pub ctx: Option<T>,
 }
 
-impl<T> TonicDescriptor<T> {
+impl<T> GrpcDescriptor<T> {
     pub fn new(
         max_hook_calls_at_once: Option<usize>,
         wait_async_tasks_us: Option<u64>,
@@ -45,7 +46,7 @@ impl<T> TonicDescriptor<T> {
         max_decoding_message_size: Option<usize>,
         max_encoding_message_size: Option<usize>,
         outbound_buffer: Option<usize>,
-        custom_data: Option<T>,
+        ctx: Option<T>,
     ) -> Self {
         let mut descriptor = Self::default();
         descriptor.max_hook_calls_at_once = max_hook_calls_at_once.filter(|&x| x > 0).unwrap_or(10);
@@ -57,7 +58,7 @@ impl<T> TonicDescriptor<T> {
         descriptor.max_decoding_message_size = max_decoding_message_size;
         descriptor.max_encoding_message_size = max_encoding_message_size;
         descriptor.outbound_buffer = outbound_buffer.unwrap_or(default_outbound_buffer());
-        descriptor.custom_data = custom_data;
+        descriptor.ctx = ctx;
         descriptor
     }
 
@@ -80,7 +81,7 @@ impl<T> TonicDescriptor<T> {
     }
 }
 
-impl<T> Default for TonicDescriptor<T> {
+impl<T> Default for GrpcDescriptor<T> {
     fn default() -> Self {
         Self {
             max_hook_calls_at_once: 10,
@@ -92,12 +93,12 @@ impl<T> Default for TonicDescriptor<T> {
             max_decoding_message_size: None,
             max_encoding_message_size: None,
             outbound_buffer: default_outbound_buffer(),
-            custom_data: None,
+            ctx: None,
         }
     }
 }
 
-impl<T: Debug + Clone + Send + 'static> StreamDescriptor<T> for TonicDescriptor<T> {
+impl<T: Debug + Clone + Send + 'static> StreamDescriptor<T> for GrpcDescriptor<T> {
     fn venue(&self) -> impl Venue {
         "any"
     }
@@ -122,7 +123,7 @@ impl<T: Debug + Clone + Send + 'static> StreamDescriptor<T> for TonicDescriptor<
         false
     }
 
-    fn custom_data(&self) -> Option<&T> {
-        self.custom_data.as_ref()
+    fn context(&self) -> Option<&T> {
+        self.ctx.as_ref()
     }
 }

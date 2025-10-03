@@ -1,6 +1,6 @@
 use crate::connector::BaseConnector;
+use crate::connector::features::grpc::client::{GrpcChannelSpec, GrpcClient};
 use crate::connector::features::shared::clients_map::{ClientConfig, ClientsMap, SpecificClient};
-use crate::connector::features::tonic::client::{TonicChannelSpec, TonicClient};
 use crate::utils::{CancelToken, CoreStats};
 
 use serde::{Deserialize, Serialize};
@@ -8,34 +8,34 @@ use std::{fmt::Display, sync::Arc};
 use tokio::runtime::{Builder, Runtime};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct TonicConnectorConfig {
+pub struct GrpcConnectorConfig {
     pub default_max_cores: Option<usize>,
     pub specific_core_ids: Vec<usize>,
     pub use_core_stats: bool,
-    pub client: ClientConfig<TonicChannelSpec>,
+    pub client: ClientConfig<GrpcChannelSpec>,
 }
 
-pub struct TonicConnector {
-    config: TonicConnectorConfig,
-    clients_map: ClientsMap<TonicClient, TonicChannelSpec>,
+pub struct GrpcConnector {
+    config: GrpcConnectorConfig,
+    clients_map: ClientsMap<GrpcClient, GrpcChannelSpec>,
     cancel_token: CancelToken,
     core_stats: Option<Arc<CoreStats>>,
     rt_tokio: Arc<tokio::runtime::Runtime>,
 }
 
-impl TonicConnector {
-    pub fn clients_map(&self) -> ClientsMap<TonicClient, TonicChannelSpec> {
+impl GrpcConnector {
+    pub fn clients_map(&self) -> ClientsMap<GrpcClient, GrpcChannelSpec> {
         self.clients_map.clone()
     }
 
     pub fn upsert_client(
         &self,
-        client: SpecificClient<TonicChannelSpec>,
-    ) -> anyhow::Result<Arc<TonicClient>> {
+        client: SpecificClient<GrpcChannelSpec>,
+    ) -> anyhow::Result<Arc<GrpcClient>> {
         self.clients_map.upsert(client)
     }
 
-    pub fn remove_client(&self, id: usize) -> Option<Arc<TonicClient>> {
+    pub fn remove_client(&self, id: usize) -> Option<Arc<GrpcClient>> {
         self.clients_map.remove(id)
     }
 
@@ -48,8 +48,8 @@ impl TonicConnector {
     }
 }
 
-impl BaseConnector for TonicConnector {
-    type MainConfig = TonicConnectorConfig;
+impl BaseConnector for GrpcConnector {
+    type MainConfig = GrpcConnectorConfig;
     ///  создаются gRPC-каналы (tonic::transport::Channel) через create_channel().
     fn init(
         config: Self::MainConfig,
@@ -99,7 +99,7 @@ impl BaseConnector for TonicConnector {
     }
 }
 
-impl Display for TonicConnector {
+impl Display for GrpcConnector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "TonicConnector")
     }
@@ -114,19 +114,19 @@ mod tests {
         connector::{
             BaseConnector, EventTxType, HookArgs,
             features::{
-                shared::{clients_map::SpecificClient, events::StreamEvent},
-                tonic::{
-                    client::TonicChannelSpec,
-                    connector::{TonicConnector, TonicConnectorConfig},
+                grpc::{
+                    client::GrpcChannelSpec,
+                    connector::{GrpcConnector, GrpcConnectorConfig},
                     grpcbin::{
                         DummyMessage, SubscribeRequest, SubscribeRequestFilterBlocks,
                         SubscribeRequestFilterSlots, dummy_message,
                     },
                     stream::{
-                        GrpcEvent, GrpcMethod, GrpcStreamCommand, GrpcStreamMode, GrpcUnaryCall,
-                        TonicDescriptor,
+                        GrpcDescriptor, GrpcEvent, GrpcMethod, GrpcStreamCommand, GrpcStreamMode,
+                        GrpcUnaryCall,
                     },
                 },
+                shared::{clients_map::SpecificClient, events::StreamEvent},
             },
         },
         io::ringbuffer::RingSender,
@@ -139,10 +139,10 @@ mod tests {
         logger.init().unwrap()
     }
 
-    fn tonic_conn_init(uri: &str, tls: bool, conn_id: usize) -> TonicConnector {
+    fn tonic_conn_init(uri: &str, tls: bool, conn_id: usize) -> GrpcConnector {
         let cancel = CancelToken::new_root();
-        TonicConnector::init(
-            TonicConnectorConfig {
+        GrpcConnector::init(
+            GrpcConnectorConfig {
                 default_max_cores: Some(4),
                 specific_core_ids: vec![],
                 use_core_stats: true,
@@ -151,7 +151,7 @@ mod tests {
                     specific: vec![SpecificClient {
                         id: conn_id,
                         ip: None,
-                        spec: TonicChannelSpec {
+                        spec: GrpcChannelSpec {
                             uri: uri.to_string(),
                             connect_timeout_ms: Some(10000),
                             request_timeout_ms: Some(10000),
@@ -176,15 +176,15 @@ mod tests {
 
         let conn_id = 0;
 
-        let mut tonic_conn = tonic_conn_init(
+        let mut grpc_conn = tonic_conn_init(
             "https://yellowstone-solana-mainnet.core.chainstack.com",
             true,
             conn_id,
         );
 
-        let streaming_descriptor = TonicDescriptor::high_throughput();
+        let streaming_descriptor = GrpcDescriptor::<()>::high_throughput();
 
-        let mut geyser_stream = tonic_conn
+        let mut geyser_stream = grpc_conn
             .spawn_stream(
                 streaming_descriptor,
                 EventTxType::Own,
@@ -253,8 +253,8 @@ mod tests {
             RingSender<()>,
             NullReducer,
             NullState,
-            TonicDescriptor<()>,
-            ()
+            GrpcDescriptor<()>,
+            (),
         >,
     ) {
         tracing::debug!("Geyser hook: event={:?}", args.raw);
@@ -266,7 +266,7 @@ mod tests {
         let conn_id = 0;
         let mut tonic_conn = tonic_conn_init("https://grpcb.in:9001", true, conn_id);
 
-        let mut jito_unary_descriptor = TonicDescriptor::high_throughput();
+        let mut jito_unary_descriptor = GrpcDescriptor::<()>::high_throughput();
         jito_unary_descriptor.max_decoding_message_size = Some(10 * 1024 * 1024);
         jito_unary_descriptor.max_encoding_message_size = Some(10 * 1024 * 1024);
 
@@ -327,8 +327,8 @@ mod tests {
             RingSender<()>,
             NullReducer,
             NullState,
-            TonicDescriptor<()>,
-            ()
+            GrpcDescriptor<()>,
+            (),
         >,
     ) {
         if let Ok(m) = args.raw.inner().decode_as::<DummyMessage>() {

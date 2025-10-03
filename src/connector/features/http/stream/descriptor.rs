@@ -76,7 +76,8 @@ pub struct ReqwestStreamDescriptor<T> {
     /// Empty means "no limits".
     pub rate_limits: Vec<RateLimitConfig>,
 
-    pub custom_data: Option<T>,
+    /// User-defined context passed to the hook.
+    pub ctx: Option<T>,
 }
 
 impl<T> ReqwestStreamDescriptor<T> {
@@ -87,7 +88,7 @@ impl<T> ReqwestStreamDescriptor<T> {
         max_pending_events: Option<usize>,
         core_pick_policy: Option<CorePickPolicy>,
         rate_limits: Option<Vec<RateLimitConfig>>,
-        custom_data: Option<T>,
+        ctx: Option<T>,
     ) -> Self {
         let max_hook_calls_at_once = max_hook_calls_at_once.filter(|&x| x > 0).unwrap_or(10);
         let wait_async_tasks_us = wait_async_tasks_us.unwrap_or(100);
@@ -99,7 +100,7 @@ impl<T> ReqwestStreamDescriptor<T> {
             wait_async_tasks_us,
             core_pick_policy,
             rate_limits: rate_limits.unwrap_or_default(),
-            custom_data,
+            ctx,
         }
     }
 
@@ -136,7 +137,7 @@ impl<T> Default for ReqwestStreamDescriptor<T> {
             max_pending_events: None,
             core_pick_policy: None,
             rate_limits: vec![],
-            custom_data: None,
+            ctx: None,
         }
     }
 }
@@ -166,7 +167,7 @@ impl<T: Debug + Clone + Send + 'static> StreamDescriptor<T> for ReqwestStreamDes
         false
     }
 
-    fn custom_data(&self) -> Option<&T> {
-        self.custom_data.as_ref()
+    fn context(&self) -> Option<&T> {
+        self.ctx.as_ref()
     }
 }

@@ -2,8 +2,8 @@ use std::fmt::Debug;
 
 use serde::Deserialize;
 
-use crate::connector::{Kind, StreamDescriptor, Venue};
 use crate::connector::features::shared::rate_limiter::RateLimitConfig;
+use crate::connector::{Kind, StreamDescriptor, Venue};
 use crate::utils::CorePickPolicy;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -15,7 +15,7 @@ pub struct WebSocketStreamDescriptor<T> {
     pub core_pick_policy: Option<CorePickPolicy>,
     #[serde(default)]
     pub rate_limits: Vec<RateLimitConfig>,
-    pub custom_data: Option<T>,
+    pub ctx: Option<T>,
 }
 
 impl<T> WebSocketStreamDescriptor<T> {
@@ -26,7 +26,7 @@ impl<T> WebSocketStreamDescriptor<T> {
         max_pending_events: Option<usize>,
         core_pick_policy: Option<CorePickPolicy>,
         rate_limits: Option<Vec<RateLimitConfig>>,
-        custom_data: Option<T>,
+        ctx: Option<T>,
     ) -> Self {
         Self {
             max_hook_calls_at_once: max_hook_calls_at_once.filter(|v| *v > 0).unwrap_or(32),
@@ -35,7 +35,7 @@ impl<T> WebSocketStreamDescriptor<T> {
             max_pending_events,
             core_pick_policy,
             rate_limits: rate_limits.unwrap_or_default(),
-            custom_data,
+            ctx,
         }
     }
 
@@ -47,7 +47,7 @@ impl<T> WebSocketStreamDescriptor<T> {
             max_pending_events: Some(512),
             core_pick_policy: None,
             rate_limits: Vec::new(),
-            custom_data: None,
+            ctx: None,
         }
     }
 
@@ -59,7 +59,7 @@ impl<T> WebSocketStreamDescriptor<T> {
             max_pending_events: Some(2048),
             core_pick_policy: None,
             rate_limits: Vec::new(),
-            custom_data: None,
+            ctx: None,
         }
     }
 }
@@ -73,7 +73,7 @@ impl<T> Default for WebSocketStreamDescriptor<T> {
             max_pending_events: None,
             core_pick_policy: None,
             rate_limits: Vec::new(),
-            custom_data: None,
+            ctx: None,
         }
     }
 }
@@ -103,7 +103,7 @@ impl<T: Debug + Clone + Send + 'static> StreamDescriptor<T> for WebSocketStreamD
         false
     }
 
-    fn custom_data(&self) -> Option<&T> {
-        self.custom_data.as_ref()
+    fn context(&self) -> Option<&T> {
+        self.ctx.as_ref()
     }
 }

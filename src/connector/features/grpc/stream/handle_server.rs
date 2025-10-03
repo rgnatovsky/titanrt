@@ -1,10 +1,10 @@
 use crate::connector::features::shared::events::StreamEvent;
 use crate::connector::features::shared::rate_limiter::RateLimitManager;
-use crate::connector::features::tonic::codec::RawCodec;
-use crate::connector::features::tonic::stream::GrpcStreamMode;
-use crate::connector::features::tonic::stream::actions::GrpcStreamConnect;
-use crate::connector::features::tonic::stream::event::{GrpcEvent, GrpcEventKind};
-use crate::connector::features::tonic::stream::utils::{
+use crate::connector::features::grpc::codec::RawCodec;
+use crate::connector::features::grpc::stream::GrpcStreamMode;
+use crate::connector::features::grpc::stream::actions::GrpcStreamConnect;
+use crate::connector::features::grpc::stream::event::{GrpcEvent, GrpcEventKind};
+use crate::connector::features::grpc::stream::utils::{
     ActiveStream, StreamContext, StreamLifecycle, emit_event,
 };
 

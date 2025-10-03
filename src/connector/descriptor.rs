@@ -36,5 +36,5 @@ pub trait StreamDescriptor<T>: Debug + Clone + Send + 'static {
     /// Initial health state of the stream.
     fn health_at_start(&self) -> bool;
 
-    fn custom_data(&self) -> Option<&T>;
+    fn context(&self) -> Option<&T>;
 }

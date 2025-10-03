@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::connector::features::shared::clients_map::{ClientInitializer, SpecificClient};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct TonicChannelSpec {
+pub struct GrpcChannelSpec {
     pub uri: String,
     pub connect_timeout_ms: Option<u64>,
     pub request_timeout_ms: Option<u64>,
@@ -22,16 +22,16 @@ pub struct TonicChannelSpec {
 }
 
 #[derive(Clone)]
-pub struct TonicClient(Channel);
+pub struct GrpcClient(Channel);
 
-impl TonicClient {
+impl GrpcClient {
     pub fn channel(&self) -> Channel {
         self.0.clone()
     }
 }
 
-impl ClientInitializer<TonicChannelSpec> for TonicClient {
-    fn init(cfg: &SpecificClient<TonicChannelSpec>, rt: Option<Arc<Runtime>>) -> Result<Self> {
+impl ClientInitializer<GrpcChannelSpec> for GrpcClient {
+    fn init(cfg: &SpecificClient<GrpcChannelSpec>, rt: Option<Arc<Runtime>>) -> Result<Self> {
         let rt = rt.ok_or_else(|| anyhow::anyhow!("[TonicClient] Tokio Runtime is required"))?;
 
         let mut endpoint = Endpoint::from_shared(cfg.spec.uri.clone())
@@ -96,7 +96,7 @@ impl ClientInitializer<TonicChannelSpec> for TonicClient {
             .block_on(async { endpoint.connect().await })
             .map_err(|e| anyhow::anyhow!("[TonicClient] connect error: {e:#}"))?;
 
-        Ok(TonicClient(client))
+        Ok(GrpcClient(client))
     }
 }
 
@@ -106,7 +106,7 @@ mod tests {
     use tokio::runtime::Builder;
 
     use crate::connector::features::{
-        shared::clients_map::ClientInitializer, tonic::client::TonicClient,
+        grpc::client::GrpcClient, shared::clients_map::ClientInitializer,
     };
 
     #[test]
@@ -123,7 +123,7 @@ mod tests {
         );
 
         let cfg = SpecificClient {
-            spec: super::TonicChannelSpec {
+            spec: super::GrpcChannelSpec {
                 uri: "http://127.0.0.1:50051".to_string(),
                 connect_timeout_ms: None,
                 request_timeout_ms: None,
@@ -136,6 +136,6 @@ mod tests {
             id: 1,
         };
 
-        TonicClient::init(&cfg, Some(rt_tokio.clone())).unwrap();
+        GrpcClient::init(&cfg, Some(rt_tokio.clone())).unwrap();
     }
 }

@@ -1,21 +1,21 @@
 use crate::connector::errors::{StreamError, StreamResult};
+use crate::connector::features::grpc::client::{GrpcChannelSpec, GrpcClient};
+use crate::connector::features::grpc::codec::RawCodec;
+use crate::connector::features::grpc::connector::GrpcConnector;
+use crate::connector::features::grpc::stream::GrpcStreamMode;
+use crate::connector::features::grpc::stream::actions::{GrpcCommand, GrpcStreamCommand};
+use crate::connector::features::grpc::stream::descriptor::GrpcDescriptor;
+use crate::connector::features::grpc::stream::event::{GrpcEvent, GrpcEventKind};
+use crate::connector::features::grpc::stream::handle_bidi::start_bidi_stream;
+use crate::connector::features::grpc::stream::handle_client::start_client_stream;
+use crate::connector::features::grpc::stream::handle_server::start_server_stream;
+use crate::connector::features::grpc::stream::utils::{
+    ActiveStream, StreamContext, StreamLifecycle, emit_event,
+};
 use crate::connector::features::shared::actions::StreamAction;
 use crate::connector::features::shared::clients_map::ClientsMap;
 use crate::connector::features::shared::events::StreamEvent;
 use crate::connector::features::shared::rate_limiter::RateLimitManager;
-use crate::connector::features::tonic::client::{TonicChannelSpec, TonicClient};
-use crate::connector::features::tonic::codec::RawCodec;
-use crate::connector::features::tonic::connector::TonicConnector;
-use crate::connector::features::tonic::stream::GrpcStreamMode;
-use crate::connector::features::tonic::stream::actions::{GrpcCommand, GrpcStreamCommand};
-use crate::connector::features::tonic::stream::descriptor::TonicDescriptor;
-use crate::connector::features::tonic::stream::event::{GrpcEvent, GrpcEventKind};
-use crate::connector::features::tonic::stream::handle_bidi::start_bidi_stream;
-use crate::connector::features::tonic::stream::handle_client::start_client_stream;
-use crate::connector::features::tonic::stream::handle_server::start_server_stream;
-use crate::connector::features::tonic::stream::utils::{
-    ActiveStream, StreamContext, StreamLifecycle, emit_event,
-};
 use crate::connector::{Hook, HookArgs, IntoHook, RuntimeCtx, StreamRunner, StreamSpawner};
 use crate::io::ringbuffer::RingSender;
 use crate::prelude::{BaseRx, TxPairExt};
@@ -35,35 +35,35 @@ use tokio::time::{self, sleep};
 use tonic::Status;
 use tonic::client::Grpc;
 
-impl<E, R, S, T> StreamSpawner<TonicDescriptor<T>, E, R, S, T> for TonicConnector
-where
-    E: TxPairExt,
-    S: StateMarker,
-    R: Reducer,
-       T: Debug + Clone + Send + 'static,
-{
-}
-
-impl<E, R, S, T> StreamRunner<TonicDescriptor<T>, E, R, S, T> for TonicConnector
+impl<E, R, S, T> StreamSpawner<GrpcDescriptor<T>, E, R, S, T> for GrpcConnector
 where
     E: TxPairExt,
     S: StateMarker,
     R: Reducer,
     T: Debug + Clone + Send + 'static,
 {
-    type Config = (ClientsMap<TonicClient, TonicChannelSpec>, Arc<Runtime>);
+}
+
+impl<E, R, S, T> StreamRunner<GrpcDescriptor<T>, E, R, S, T> for GrpcConnector
+where
+    E: TxPairExt,
+    S: StateMarker,
+    R: Reducer,
+    T: Debug + Clone + Send + 'static,
+{
+    type Config = (ClientsMap<GrpcClient, GrpcChannelSpec>, Arc<Runtime>);
     type ActionTx = RingSender<StreamAction<GrpcCommand>>;
     type RawEvent = StreamEvent<GrpcEvent>;
     type HookResult = ();
 
-    fn build_config(&mut self, _desc: &TonicDescriptor<T>) -> anyhow::Result<Self::Config> {
+    fn build_config(&mut self, _desc: &GrpcDescriptor<T>) -> anyhow::Result<Self::Config> {
         Ok((self.clients_map(), self.rt_tokio()))
     }
 
     fn run<H>(
         mut ctx: RuntimeCtx<
-            (ClientsMap<TonicClient, TonicChannelSpec>, Arc<Runtime>),
-            TonicDescriptor<T>,
+            (ClientsMap<GrpcClient, GrpcChannelSpec>, Arc<Runtime>),
+            GrpcDescriptor<T>,
             RingSender<StreamAction<GrpcCommand>>,
             E,
             R,
@@ -73,7 +73,7 @@ where
         hook: H,
     ) -> StreamResult<()>
     where
-        H: IntoHook<StreamEvent<GrpcEvent>, E, R, S, TonicDescriptor<T>, (), T>,
+        H: IntoHook<StreamEvent<GrpcEvent>, E, R, S, GrpcDescriptor<T>, (), T>,
         E: TxPairExt,
         S: StateMarker,
     {

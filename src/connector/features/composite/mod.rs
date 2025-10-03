@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 use crate::connector::BaseConnector;
 use crate::utils::CancelToken;
 
-#[cfg(feature = "reqwest_conn")]
-use crate::connector::features::reqwest::connector::{ReqwestConnector, ReqwestConnectorConfig};
 #[cfg(feature = "tonic_conn")]
-use crate::connector::features::tonic::connector::{TonicConnector, TonicConnectorConfig};
+use crate::connector::features::grpc::connector::{GrpcConnector, GrpcConnectorConfig};
+#[cfg(feature = "reqwest_conn")]
+use crate::connector::features::http::connector::{HttpConnector, HttpConnectorConfig};
 #[cfg(feature = "websocket")]
 use crate::connector::features::websocket::connector::{
     WebSocketConnector, WebSocketConnectorConfig,
@@ -30,9 +30,9 @@ pub struct CompositeConnectorConfig {
     #[cfg(feature = "websocket")]
     pub websocket: Option<WebSocketConnectorConfig>,
     #[cfg(feature = "reqwest_conn")]
-    pub reqwest: Option<ReqwestConnectorConfig>,
+    pub reqwest: Option<HttpConnectorConfig>,
     #[cfg(feature = "tonic_conn")]
-    pub tonic: Option<TonicConnectorConfig>,
+    pub tonic: Option<GrpcConnectorConfig>,
     #[serde(default)]
     pub cancel_streams_policy: CancelStreamsPolicy,
 }
@@ -43,9 +43,9 @@ pub struct CompositeConnector {
     #[cfg(feature = "websocket")]
     websocket: ConnectorSlot<WebSocketConnector>,
     #[cfg(feature = "reqwest_conn")]
-    reqwest: ConnectorSlot<ReqwestConnector>,
+    reqwest: ConnectorSlot<HttpConnector>,
     #[cfg(feature = "tonic_conn")]
-    tonic: ConnectorSlot<TonicConnector>,
+    tonic: ConnectorSlot<GrpcConnector>,
 }
 
 impl CompositeConnector {
@@ -82,7 +82,7 @@ impl CompositeConnector {
     }
 
     #[cfg(feature = "reqwest_conn")]
-    pub fn reqwest(&self) -> Result<Option<ConnectorGuard<'_, ReqwestConnector>>> {
+    pub fn reqwest(&self) -> Result<Option<ConnectorGuard<'_, HttpConnector>>> {
         self.reqwest
             .ensure(&self.cancel_token, &self.reserved_core_ids)
     }
@@ -90,14 +90,14 @@ impl CompositeConnector {
     #[cfg(feature = "reqwest_conn")]
     pub fn with_reqwest<F, R>(&self, f: F) -> Result<Option<R>>
     where
-        F: FnOnce(&mut ReqwestConnector) -> Result<R>,
+        F: FnOnce(&mut HttpConnector) -> Result<R>,
     {
         self.reqwest
             .with(&self.cancel_token, &self.reserved_core_ids, f)
     }
 
     #[cfg(feature = "tonic_conn")]
-    pub fn tonic(&self) -> Result<Option<ConnectorGuard<'_, TonicConnector>>> {
+    pub fn tonic(&self) -> Result<Option<ConnectorGuard<'_, GrpcConnector>>> {
         self.tonic
             .ensure(&self.cancel_token, &self.reserved_core_ids)
     }
@@ -105,7 +105,7 @@ impl CompositeConnector {
     #[cfg(feature = "tonic_conn")]
     pub fn with_tonic<F, R>(&self, f: F) -> Result<Option<R>>
     where
-        F: FnOnce(&mut TonicConnector) -> Result<R>,
+        F: FnOnce(&mut GrpcConnector) -> Result<R>,
     {
         self.tonic
             .with(&self.cancel_token, &self.reserved_core_ids, f)
@@ -117,12 +117,12 @@ impl CompositeConnector {
     }
 
     #[cfg(feature = "reqwest_conn")]
-    pub fn configure_reqwest(&self, config: Option<ReqwestConnectorConfig>) {
+    pub fn configure_reqwest(&self, config: Option<HttpConnectorConfig>) {
         self.reqwest.update_config(config);
     }
 
     #[cfg(feature = "tonic_conn")]
-    pub fn configure_tonic(&self, config: Option<TonicConnectorConfig>) {
+    pub fn configure_tonic(&self, config: Option<GrpcConnectorConfig>) {
         self.tonic.update_config(config);
     }
 
@@ -147,12 +147,12 @@ impl CompositeConnector {
     }
 
     #[cfg(feature = "reqwest_conn")]
-    pub fn reqwest_config(&self) -> Option<ReqwestConnectorConfig> {
+    pub fn reqwest_config(&self) -> Option<HttpConnectorConfig> {
         self.reqwest.config_snapshot()
     }
 
     #[cfg(feature = "tonic_conn")]
-    pub fn tonic_config(&self) -> Option<TonicConnectorConfig> {
+    pub fn tonic_config(&self) -> Option<GrpcConnectorConfig> {
         self.tonic.config_snapshot()
     }
 

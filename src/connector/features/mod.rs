@@ -5,10 +5,10 @@
 ))]
 pub mod composite;
 #[cfg(feature = "reqwest_conn")]
-pub mod reqwest;
+pub mod http;
 #[cfg(feature = "shared")]
 pub mod shared;
 #[cfg(feature = "tonic_conn")]
-pub mod tonic;
+pub mod grpc;
 #[cfg(feature = "websocket")]
 pub mod websocket;

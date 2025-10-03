@@ -1,5 +1,5 @@
 use crate::connector::BaseConnector;
-use crate::connector::features::reqwest::client::{ReqwestClient, ReqwestClientSpec};
+use crate::connector::features::http::client::{ReqwestClient, ReqwestClientSpec};
 use crate::connector::features::shared::clients_map::{ClientConfig, ClientsMap, SpecificClient};
 use crate::utils::{CancelToken, CoreStats};
 use serde::{Deserialize, Serialize};
@@ -8,21 +8,21 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ReqwestConnectorConfig {
+pub struct HttpConnectorConfig {
     pub default_max_cores: Option<usize>,
     pub specific_core_ids: Vec<usize>,
     pub use_core_stats: bool,
     pub client: ClientConfig<ReqwestClientSpec>,
 }
 
-pub struct ReqwestConnector {
-    config: ReqwestConnectorConfig,
+pub struct HttpConnector {
+    config: HttpConnectorConfig,
     clients_map: ClientsMap<ReqwestClient, ReqwestClientSpec>,
     cancel_token: CancelToken,
     core_stats: Option<Arc<CoreStats>>,
 }
 
-impl ReqwestConnector {
+impl HttpConnector {
     pub fn clients_map(&self) -> ClientsMap<ReqwestClient, ReqwestClientSpec> {
         self.clients_map.clone()
     }
@@ -43,8 +43,8 @@ impl ReqwestConnector {
     }
 }
 
-impl BaseConnector for ReqwestConnector {
-    type MainConfig = ReqwestConnectorConfig;
+impl BaseConnector for HttpConnector {
+    type MainConfig = HttpConnectorConfig;
 
     fn init(
         config: Self::MainConfig,
@@ -87,9 +87,8 @@ impl BaseConnector for ReqwestConnector {
     }
 }
 
-impl Display for ReqwestConnector {
+impl Display for HttpConnector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "BinanceConnector")
     }
 }
-

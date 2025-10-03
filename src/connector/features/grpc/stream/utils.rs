@@ -1,6 +1,6 @@
 use crate::connector::features::shared::events::StreamEvent;
-use crate::connector::features::tonic::stream::GrpcStreamMode;
-use crate::connector::features::tonic::stream::event::GrpcEvent;
+use crate::connector::features::grpc::stream::GrpcStreamMode;
+use crate::connector::features::grpc::stream::event::GrpcEvent;
 
 use bytes::Bytes;
 use crossbeam::channel::Sender;

@@ -1,9 +1,9 @@
 use crate::connector::errors::{StreamError, StreamResult};
-use crate::connector::features::reqwest::client::{ReqwestClient, ReqwestClientSpec};
-use crate::connector::features::reqwest::connector::ReqwestConnector;
-use crate::connector::features::reqwest::stream::actions::ReqwestAction;
-use crate::connector::features::reqwest::stream::descriptor::ReqwestStreamDescriptor;
-use crate::connector::features::reqwest::stream::event::ReqwestEvent;
+use crate::connector::features::http::client::{ReqwestClient, ReqwestClientSpec};
+use crate::connector::features::http::connector::HttpConnector;
+use crate::connector::features::http::stream::actions::ReqwestAction;
+use crate::connector::features::http::stream::descriptor::ReqwestStreamDescriptor;
+use crate::connector::features::http::stream::event::ReqwestEvent;
 use crate::connector::features::shared::actions::StreamAction;
 use crate::connector::features::shared::clients_map::ClientsMap;
 use crate::connector::features::shared::events::StreamEvent;
@@ -22,7 +22,7 @@ use tokio::sync::Mutex;
 use tokio::task::LocalSet;
 use tokio::time::sleep;
 
-impl<E, R, S, T> StreamSpawner<ReqwestStreamDescriptor<T>, E, R, S, T> for ReqwestConnector
+impl<E, R, S, T> StreamSpawner<ReqwestStreamDescriptor<T>, E, R, S, T> for HttpConnector
 where
     E: TxPairExt,
     S: StateMarker,
@@ -31,7 +31,7 @@ where
 {
 }
 
-impl<E, R, S, T> StreamRunner<ReqwestStreamDescriptor<T>, E, R, S, T> for ReqwestConnector
+impl<E, R, S, T> StreamRunner<ReqwestStreamDescriptor<T>, E, R, S, T> for HttpConnector
 where
     E: TxPairExt,
     S: StateMarker,
