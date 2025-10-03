@@ -25,6 +25,7 @@ impl<T> WebSocketStreamDescriptor<T> {
         max_pending_actions: Option<usize>,
         max_pending_events: Option<usize>,
         core_pick_policy: Option<CorePickPolicy>,
+        rate_limits: Option<Vec<RateLimitConfig>>,
         custom_data: Option<T>,
     ) -> Self {
         Self {
@@ -33,7 +34,7 @@ impl<T> WebSocketStreamDescriptor<T> {
             max_pending_actions,
             max_pending_events,
             core_pick_policy,
-            rate_limits: Vec::new(),
+            rate_limits: rate_limits.unwrap_or_default(),
             custom_data,
         }
     }
