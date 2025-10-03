@@ -8,11 +8,11 @@ use serde::{Deserialize, Serialize};
 use crate::connector::BaseConnector;
 use crate::utils::CancelToken;
 
-#[cfg(feature = "tonic_conn")]
+#[cfg(feature = "grpc_conn")]
 use crate::connector::features::grpc::connector::{GrpcConnector, GrpcConnectorConfig};
-#[cfg(feature = "reqwest_conn")]
+#[cfg(feature = "http_conn")]
 use crate::connector::features::http::connector::{HttpConnector, HttpConnectorConfig};
-#[cfg(feature = "websocket")]
+#[cfg(feature = "ws_conn")]
 use crate::connector::features::websocket::connector::{
     WebSocketConnector, WebSocketConnectorConfig,
 };
@@ -27,12 +27,12 @@ pub enum CancelStreamsPolicy {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct CompositeConnectorConfig {
-    #[cfg(feature = "websocket")]
+    #[cfg(feature = "ws_conn")]
     pub websocket: Option<WebSocketConnectorConfig>,
-    #[cfg(feature = "reqwest_conn")]
-    pub reqwest: Option<HttpConnectorConfig>,
-    #[cfg(feature = "tonic_conn")]
-    pub tonic: Option<GrpcConnectorConfig>,
+    #[cfg(feature = "http_conn")]
+    pub http: Option<HttpConnectorConfig>,
+    #[cfg(feature = "grpc_conn")]
+    pub grpc: Option<GrpcConnectorConfig>,
     #[serde(default)]
     pub cancel_streams_policy: CancelStreamsPolicy,
 }
@@ -40,12 +40,12 @@ pub struct CompositeConnectorConfig {
 pub struct CompositeConnector {
     cancel_token: CancelToken,
     reserved_core_ids: Option<Vec<usize>>,
-    #[cfg(feature = "websocket")]
+    #[cfg(feature = "ws_conn")]
     websocket: ConnectorSlot<WebSocketConnector>,
-    #[cfg(feature = "reqwest_conn")]
-    reqwest: ConnectorSlot<HttpConnector>,
-    #[cfg(feature = "tonic_conn")]
-    tonic: ConnectorSlot<GrpcConnector>,
+    #[cfg(feature = "http_conn")]
+    http: ConnectorSlot<HttpConnector>,
+    #[cfg(feature = "grpc_conn")]
+    grpc: ConnectorSlot<GrpcConnector>,
 }
 
 impl CompositeConnector {
@@ -55,24 +55,25 @@ impl CompositeConnector {
         reserved_core_ids: Option<Vec<usize>>,
     ) -> Self {
         Self {
-            #[cfg(feature = "websocket")]
+            #[cfg(feature = "ws_conn")]
             websocket: ConnectorSlot::new(config.websocket, config.cancel_streams_policy),
-            #[cfg(feature = "reqwest_conn")]
-            reqwest: ConnectorSlot::new(config.reqwest, config.cancel_streams_policy),
-            #[cfg(feature = "tonic_conn")]
-            tonic: ConnectorSlot::new(config.tonic, config.cancel_streams_policy),
+            #[cfg(feature = "http_conn")]
+            http: ConnectorSlot::new(config.http, config.cancel_streams_policy),
+            #[cfg(feature = "grpc_conn")]
+            grpc: ConnectorSlot::new(config.grpc, config.cancel_streams_policy),
             cancel_token,
             reserved_core_ids,
         }
     }
 
-    #[cfg(feature = "websocket")]
+
+    #[cfg(feature = "ws_conn")]
     pub fn websocket(&self) -> Result<Option<ConnectorGuard<'_, WebSocketConnector>>> {
         self.websocket
             .ensure(&self.cancel_token, &self.reserved_core_ids)
     }
 
-    #[cfg(feature = "websocket")]
+    #[cfg(feature = "ws_conn")]
     pub fn with_websocket<F, R>(&self, f: F) -> Result<Option<R>>
     where
         F: FnOnce(&mut WebSocketConnector) -> Result<R>,
@@ -81,79 +82,79 @@ impl CompositeConnector {
             .with(&self.cancel_token, &self.reserved_core_ids, f)
     }
 
-    #[cfg(feature = "reqwest_conn")]
-    pub fn reqwest(&self) -> Result<Option<ConnectorGuard<'_, HttpConnector>>> {
-        self.reqwest
+    #[cfg(feature = "http_conn")]
+    pub fn http(&self) -> Result<Option<ConnectorGuard<'_, HttpConnector>>> {
+        self.http
             .ensure(&self.cancel_token, &self.reserved_core_ids)
     }
 
-    #[cfg(feature = "reqwest_conn")]
+    #[cfg(feature = "http_conn")]
     pub fn with_reqwest<F, R>(&self, f: F) -> Result<Option<R>>
     where
         F: FnOnce(&mut HttpConnector) -> Result<R>,
     {
-        self.reqwest
+        self.http
             .with(&self.cancel_token, &self.reserved_core_ids, f)
     }
 
-    #[cfg(feature = "tonic_conn")]
-    pub fn tonic(&self) -> Result<Option<ConnectorGuard<'_, GrpcConnector>>> {
-        self.tonic
+    #[cfg(feature = "grpc_conn")]
+    pub fn grpc(&self) -> Result<Option<ConnectorGuard<'_, GrpcConnector>>> {
+        self.grpc
             .ensure(&self.cancel_token, &self.reserved_core_ids)
     }
 
-    #[cfg(feature = "tonic_conn")]
+    #[cfg(feature = "grpc_conn")]
     pub fn with_tonic<F, R>(&self, f: F) -> Result<Option<R>>
     where
         F: FnOnce(&mut GrpcConnector) -> Result<R>,
     {
-        self.tonic
+        self.grpc
             .with(&self.cancel_token, &self.reserved_core_ids, f)
     }
 
-    #[cfg(feature = "websocket")]
+    #[cfg(feature = "ws_conn")]
     pub fn configure_websocket(&self, config: Option<WebSocketConnectorConfig>) {
         self.websocket.update_config(config);
     }
 
-    #[cfg(feature = "reqwest_conn")]
+    #[cfg(feature = "http_conn")]
     pub fn configure_reqwest(&self, config: Option<HttpConnectorConfig>) {
-        self.reqwest.update_config(config);
+        self.http.update_config(config);
     }
 
-    #[cfg(feature = "tonic_conn")]
+    #[cfg(feature = "grpc_conn")]
     pub fn configure_tonic(&self, config: Option<GrpcConnectorConfig>) {
-        self.tonic.update_config(config);
+        self.grpc.update_config(config);
     }
 
-    #[cfg(feature = "websocket")]
+    #[cfg(feature = "ws_conn")]
     pub fn unload_websocket(&self) {
         self.websocket.unload();
     }
 
-    #[cfg(feature = "reqwest_conn")]
+    #[cfg(feature = "http_conn")]
     pub fn unload_reqwest(&self) {
-        self.reqwest.unload();
+        self.http.unload();
     }
 
-    #[cfg(feature = "tonic_conn")]
+    #[cfg(feature = "grpc_conn")]
     pub fn unload_tonic(&self) {
-        self.tonic.unload();
+        self.grpc.unload();
     }
 
-    #[cfg(feature = "websocket")]
+    #[cfg(feature = "ws_conn")]
     pub fn websocket_config(&self) -> Option<WebSocketConnectorConfig> {
         self.websocket.config_snapshot()
     }
 
-    #[cfg(feature = "reqwest_conn")]
+    #[cfg(feature = "http_conn")]
     pub fn reqwest_config(&self) -> Option<HttpConnectorConfig> {
-        self.reqwest.config_snapshot()
+        self.http.config_snapshot()
     }
 
-    #[cfg(feature = "tonic_conn")]
+    #[cfg(feature = "grpc_conn")]
     pub fn tonic_config(&self) -> Option<GrpcConnectorConfig> {
-        self.tonic.config_snapshot()
+        self.grpc.config_snapshot()
     }
 
     pub fn cancel_token(&self) -> CancelToken {

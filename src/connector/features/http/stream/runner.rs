@@ -1,9 +1,9 @@
 use crate::connector::errors::{StreamError, StreamResult};
 use crate::connector::features::http::client::{ReqwestClient, ReqwestClientSpec};
 use crate::connector::features::http::connector::HttpConnector;
-use crate::connector::features::http::stream::actions::ReqwestAction;
-use crate::connector::features::http::stream::descriptor::ReqwestStreamDescriptor;
-use crate::connector::features::http::stream::event::ReqwestEvent;
+use crate::connector::features::http::stream::actions::HttpAction;
+use crate::connector::features::http::stream::descriptor::HttpDescriptor;
+use crate::connector::features::http::stream::event::HttpEvent;
 use crate::connector::features::shared::actions::StreamAction;
 use crate::connector::features::shared::clients_map::ClientsMap;
 use crate::connector::features::shared::events::StreamEvent;
@@ -22,7 +22,7 @@ use tokio::sync::Mutex;
 use tokio::task::LocalSet;
 use tokio::time::sleep;
 
-impl<E, R, S, T> StreamSpawner<ReqwestStreamDescriptor<T>, E, R, S, T> for HttpConnector
+impl<E, R, S, T> StreamSpawner<HttpDescriptor<T>, E, R, S, T> for HttpConnector
 where
     E: TxPairExt,
     S: StateMarker,
@@ -31,7 +31,7 @@ where
 {
 }
 
-impl<E, R, S, T> StreamRunner<ReqwestStreamDescriptor<T>, E, R, S, T> for HttpConnector
+impl<E, R, S, T> StreamRunner<HttpDescriptor<T>, E, R, S, T> for HttpConnector
 where
     E: TxPairExt,
     S: StateMarker,
@@ -39,19 +39,19 @@ where
     T: Debug + Clone + Send + 'static,
 {
     type Config = ClientsMap<ReqwestClient, ReqwestClientSpec>;
-    type ActionTx = RingSender<StreamAction<ReqwestAction>>;
-    type RawEvent = StreamEvent<ReqwestEvent>;
+    type ActionTx = RingSender<StreamAction<HttpAction>>;
+    type RawEvent = StreamEvent<HttpEvent>;
     type HookResult = ();
 
-    fn build_config(&mut self, _desc: &ReqwestStreamDescriptor<T>) -> anyhow::Result<Self::Config> {
+    fn build_config(&mut self, _desc: &HttpDescriptor<T>) -> anyhow::Result<Self::Config> {
         Ok(self.clients_map())
     }
 
     fn run<H>(
         mut ctx: RuntimeCtx<
             ClientsMap<ReqwestClient, ReqwestClientSpec>,
-            ReqwestStreamDescriptor<T>,
-            RingSender<StreamAction<ReqwestAction>>,
+            HttpDescriptor<T>,
+            RingSender<StreamAction<HttpAction>>,
             E,
             R,
             S,
@@ -60,7 +60,7 @@ where
         hook: H,
     ) -> StreamResult<()>
     where
-        H: IntoHook<StreamEvent<ReqwestEvent>, E, R, S, ReqwestStreamDescriptor<T>, (), T>,
+        H: IntoHook<StreamEvent<HttpEvent>, E, R, S, HttpDescriptor<T>, (), T>,
         E: TxPairExt,
         S: StateMarker,
     {
@@ -103,7 +103,7 @@ where
                 {
                     Ok(request) => request,
                     Err(e) => {
-                        let inner = ReqwestEvent::from_error(e);
+                        let inner = HttpEvent::from_error(e);
                         let stream_event = StreamEvent::builder(None)
                             .conn_id(action.conn_id())
                             .req_id(action.req_id())
@@ -140,8 +140,8 @@ where
                     }
                     let out = client.as_ref().0.execute(request).await;
                     let inner = match out {
-                        Ok(resp) => ReqwestEvent::from_raw(resp).await,
-                        Err(e) => ReqwestEvent::from_error(e),
+                        Ok(resp) => HttpEvent::from_raw(resp).await,
+                        Err(e) => HttpEvent::from_error(e),
                     };
 
                     let stream_event = StreamEvent::builder(None)

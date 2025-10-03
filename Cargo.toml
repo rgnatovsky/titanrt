@@ -70,13 +70,13 @@ name = "runtime_hot_loop"
 harness = false
 
 [features]
-default = ["connector", "reqwest_conn", "tonic_conn", "websocket"]
+default = ["connector", "http_conn", "grpc_conn", "ws_conn"]
 connector = []
-reqwest_conn = ["reqwest", "serde_urlencoded", "shared"]
-tonic_conn = ["tonic", "prost", "prost-types", "shared"]
+http_conn = ["reqwest", "serde_urlencoded", "shared"]
+grpc_conn = ["tonic", "prost", "prost-types", "shared"]
 nats_bridge = ["async-nats"]
 shared = []
-websocket = ["tungstenite", "tokio-tungstenite", "shared"]
+ws_conn = ["tungstenite", "tokio-tungstenite", "shared"]
 
 
 

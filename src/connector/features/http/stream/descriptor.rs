@@ -51,7 +51,7 @@ use serde::Deserialize;
 /// - Limiter/actor shutdown does not deadlock callers; waits resolve early.
 ///
 /// This type is the public, documented entry point; the execution loop lives in the `StreamRunner` impl.
-pub struct ReqwestStreamDescriptor<T> {
+pub struct HttpDescriptor<T> {
     /// Maximum number of hook invocations to process in a single loop tick.
     /// Works as a soft batch size to prevent the hook from monopolizing the loop.
     pub max_hook_calls_at_once: usize,
@@ -80,7 +80,7 @@ pub struct ReqwestStreamDescriptor<T> {
     pub ctx: Option<T>,
 }
 
-impl<T> ReqwestStreamDescriptor<T> {
+impl<T> HttpDescriptor<T> {
     pub fn new(
         max_hook_calls_at_once: Option<usize>,
         wait_async_tasks_us: Option<u64>,
@@ -128,7 +128,7 @@ impl<T> ReqwestStreamDescriptor<T> {
     }
 }
 
-impl<T> Default for ReqwestStreamDescriptor<T> {
+impl<T> Default for HttpDescriptor<T> {
     fn default() -> Self {
         Self {
             max_hook_calls_at_once: 10,
@@ -142,7 +142,7 @@ impl<T> Default for ReqwestStreamDescriptor<T> {
     }
 }
 
-impl<T: Debug + Clone + Send + 'static> StreamDescriptor<T> for ReqwestStreamDescriptor<T> {
+impl<T: Debug + Clone + Send + 'static> StreamDescriptor<T> for HttpDescriptor<T> {
     fn venue(&self) -> impl Venue {
         "any"
     }

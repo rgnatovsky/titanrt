@@ -6,14 +6,14 @@ use reqwest::{Response, StatusCode};
 use crate::connector::features::shared::events::StreamEventInner;
 
 #[derive(Clone, Debug)]
-pub struct ReqwestEvent {
+pub struct HttpEvent {
     status: StatusCode,
     err_msg: Option<String>,
     headers: HeaderMap,
     body: Option<Bytes>,
 }
 
-impl ReqwestEvent {
+impl HttpEvent {
     /// Creates TcpResponse from hyper Response.
     /// Consumes the hyper response and collects its body.
 
@@ -156,7 +156,7 @@ impl ReqwestEvent {
     }
 }
 
-impl StreamEventInner for ReqwestEvent {
+impl StreamEventInner for HttpEvent {
     type Body = Bytes;
     type Err = String;
     type Code = StatusCode;

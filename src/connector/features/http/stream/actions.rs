@@ -51,7 +51,7 @@ impl ActionBody {
 }
 
 #[derive(Debug, Clone)]
-pub struct ReqwestAction {
+pub struct HttpAction {
     pub method: Method,
     pub url: Url,
     pub body: ActionBody,
@@ -59,7 +59,7 @@ pub struct ReqwestAction {
     pub headers: HeaderMap,
 }
 
-impl ReqwestAction {
+impl HttpAction {
     pub(crate) fn to_request_builder(
         self,
         client: &Client,
@@ -203,8 +203,8 @@ impl ReqwestActionBuilder {
         self
     }
 
-    pub fn build(self) -> ReqwestAction {
-        ReqwestAction {
+    pub fn build(self) -> HttpAction {
+        HttpAction {
             method: self.method,
             url: self.url,
             headers: self.headers,
