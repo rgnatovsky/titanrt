@@ -7,8 +7,8 @@ use titanrt::control::inputs::InputMeta;
 use titanrt::io::mpmc::MpmcChannel;
 use titanrt::model::Output;
 use titanrt::prelude::{
-    BaseModel, BaseRx, BaseTx, ExecutionResult, NullEvent, NullModelCtx, Runtime, RuntimeConfig,
-    StopKind, StopState,
+    BaseModel, BaseRx, BaseTx, ExecutionResult, NullModelCtx, NullModelEvent, Runtime,
+    RuntimeConfig, StopKind, StopState,
 };
 use titanrt::utils::CancelToken;
 
@@ -32,7 +32,7 @@ impl BaseModel for HotModel {
     type Config = HotCfg;
     type OutputTx = titanrt::io::mpmc::MpmcSender<Output<TestOut>>;
     type OutputEvent = TestOut;
-    type Event = NullEvent;
+    type Event = NullModelEvent;
     type Ctx = NullModelCtx;
 
     fn initialize(

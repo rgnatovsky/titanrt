@@ -23,8 +23,8 @@ impl ModelContext for NullModelCtx {}
 
 /// Empty event type.
 #[derive(Clone, Debug)]
-pub struct NullEvent;
-impl ModelEvent for NullEvent {}
+pub struct NullModelEvent;
+impl ModelEvent for NullModelEvent {}
 
 /// Requested stop semantics for the model.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
