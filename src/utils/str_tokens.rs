@@ -111,4 +111,84 @@ impl StringTokens {
         }
         Some(current)
     }
+
+    /// Inserts (or replaces) a value into a JSON structure at this token path.
+    /// Creates intermediate objects/arrays as needed. Returns `true` on success.
+    pub fn insert_json(&self, target: &mut Value, new_value: Value) -> bool {
+        // Empty path replaces the whole target
+        if self.segments.is_empty() {
+            *target = new_value;
+            return true;
+        }
+
+        let mut current = target;
+
+        for (i, segment) in self.segments.iter().enumerate() {
+            let is_last = i + 1 == self.segments.len();
+
+            // If segment is a number -> treat as array index
+            if let Ok(idx) = segment.parse::<usize>() {
+                // Ensure current is an array; if not, replace with empty array
+                if !current.is_array() {
+                    *current = Value::Array(Vec::new());
+                }
+                let arr = current.as_array_mut().unwrap();
+
+                // Grow array if needed
+                if idx >= arr.len() {
+                    arr.resize(idx + 1, Value::Null);
+                }
+
+                if is_last {
+                    arr[idx] = new_value;
+                    return true;
+                } else {
+                    // Prepare next container if it's currently Null/non-container
+                    let next_is_index = self
+                        .segments
+                        .get(i + 1)
+                        .and_then(|s| s.parse::<usize>().ok())
+                        .is_some();
+
+                    if arr[idx].is_null() || !(arr[idx].is_object() || arr[idx].is_array()) {
+                        arr[idx] = if next_is_index {
+                            Value::Array(Vec::new())
+                        } else {
+                            Value::Object(serde_json::Map::new())
+                        };
+                    }
+
+                    current = &mut arr[idx];
+                }
+            } else {
+                // Object key
+                if !current.is_object() {
+                    *current = Value::Object(serde_json::Map::new());
+                }
+                let map = current.as_object_mut().unwrap();
+
+                if is_last {
+                    map.insert(segment.clone(), new_value);
+                    return true;
+                } else {
+                    let next_is_index = self
+                        .segments
+                        .get(i + 1)
+                        .and_then(|s| s.parse::<usize>().ok())
+                        .is_some();
+
+                    let entry = map.entry(segment.clone()).or_insert_with(|| {
+                        if next_is_index {
+                            Value::Array(Vec::new())
+                        } else {
+                            Value::Object(serde_json::Map::new())
+                        }
+                    });
+                    current = entry;
+                }
+            }
+        }
+
+        true
+    }
 }

@@ -1,6 +1,5 @@
 use crate::utils::StringTokens;
 use serde_json::Value;
-use std::collections::HashSet;
 
 /// Matchers used to filter routes based on labels and nested payload fields.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -11,26 +10,19 @@ pub enum RouteMatcher {
     LabelEquals(String),
     /// Matches when the label starts with the provided prefix (case-insensitive).
     LabelPrefix(String),
+    /// Matches when the label ends with the provided suffix (case-insensitive).
+    LabelSuffix(String),
+    /// Matches when the label contains the provided substring (case-insensitive).
+    LabelContains(String),
     /// Matches when the payload value at the given JSON path equals the expected string.
     PayloadPathEquals {
         path: StringTokens,
         expected: String,
     },
-
-    /// Matches when the label ends with the provided suffix (case-insensitive).
-    LabelSuffix(String),
-    /// Matches when the label contains the provided substring (case-insensitive).
-    LabelContains(String),
-
     /// Matches when the payload has any value at the provided JSON path.
     PayloadPathExists { path: StringTokens },
     /// Matches when the payload boolean at the provided JSON path equals the expected value.
     PayloadPathBoolEquals { path: StringTokens, expected: bool },
-    /// Matches when the payload string at the provided JSON path is a member of the provided set.
-    PayloadPathIn {
-        path: StringTokens,
-        options: HashSet<String>,
-    },
     /// Matches when the payload string at the provided JSON path contains the provided substring.
     PayloadPathContains { path: StringTokens, needle: String },
 }
@@ -84,18 +76,6 @@ impl RouteMatcher {
         }
     }
 
-    /// Creates a matcher that succeeds when the payload string at the path is present in the provided set.
-    pub fn payload_path_in(
-        path: impl AsRef<str>,
-        options: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Self {
-        let set = options.into_iter().map(|s| s.into()).collect();
-        RouteMatcher::PayloadPathIn {
-            path: StringTokens::parse(path.as_ref()),
-            options: set,
-        }
-    }
-
     /// Creates a matcher that succeeds when the payload string at the path contains the provided substring.
     pub fn payload_path_contains(path: impl AsRef<str>, needle: impl Into<String>) -> Self {
         RouteMatcher::PayloadPathContains {
@@ -139,16 +119,55 @@ impl RouteMatcher {
                 .and_then(|v| v.as_bool())
                 .map(|b| b == *expected)
                 .unwrap_or(false),
-            RouteMatcher::PayloadPathIn { path, options } => payload
-                .and_then(|x| path.select_json(x))
-                .and_then(|val| val.as_str())
-                .map(|s| options.contains(s))
-                .unwrap_or(false),
+
             RouteMatcher::PayloadPathContains { path, needle } => payload
                 .and_then(|x| path.select_json(x))
                 .and_then(|val| val.as_str())
                 .map(|s| s.contains(needle))
                 .unwrap_or(false),
+        }
+    }
+
+    /// Returns extraction hints: (label_fragment, payload_path).
+    /// `label_fragment` is the significant lowercased label piece used by this matcher (if any).
+    /// `payload_path` is the JSON path targeted by this matcher (if any).
+    pub fn extract_targets(&self) -> (Option<String>, Option<(&StringTokens, Value)>) {
+        match self {
+            RouteMatcher::Always => (None, None),
+
+            // label-driven
+            RouteMatcher::LabelEquals(s)
+            | RouteMatcher::LabelPrefix(s)
+            | RouteMatcher::LabelSuffix(s)
+            | RouteMatcher::LabelContains(s) => (Some(s.clone()), None),
+
+            // payload-driven
+            _ => (None, self.insertion_hint()),
+        }
+    }
+
+    /// Returns a JSON insertion hint that would satisfy this matcher, if applicable.
+    /// For payload-driven matchers, returns `(path, value)` to insert so that `matches(...)` becomes `true`.
+    /// For label-driven or non-deterministic cases, returns `None`.
+    pub fn insertion_hint(&self) -> Option<(&StringTokens, Value)> {
+        match self {
+            RouteMatcher::PayloadPathEquals { path, expected } => {
+                Some((path, Value::String(expected.clone())))
+            }
+            RouteMatcher::PayloadPathExists { path } => {
+                // Любое значение подойдёт; используем Null как нейтральное.
+                Some((path, Value::Null))
+            }
+            RouteMatcher::PayloadPathBoolEquals { path, expected } => {
+                Some((path, Value::Bool(*expected)))
+            }
+            RouteMatcher::PayloadPathContains { path, needle } => {
+                // Строка, равная needle, тоже "содержит" needle.
+                Some((path, Value::String(needle.clone())))
+            }
+
+            // Для label-* матчеров и Always — подсказка для payload отсутствует.
+            _ => None,
         }
     }
 }
