@@ -1,7 +1,10 @@
 pub use cancel_token::*;
 pub use core_pinner::*;
 pub use health_flag::*;
+pub use route_matcher::RouteMatcher;
+pub use shared_str::SharedStr;
 pub use state::*;
+pub use str_tokens::StringTokens;
 
 pub mod backoff;
 mod cancel_token;
@@ -13,7 +16,6 @@ pub mod logger;
 pub mod params_io;
 mod state;
 pub mod time;
-pub use shared_str::SharedStr;
-pub use str_tokens::StringTokens;
+mod route_matcher;
 mod shared_str;
 mod str_tokens;
