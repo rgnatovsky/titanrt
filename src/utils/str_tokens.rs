@@ -2,25 +2,25 @@ use ahash::AHashMap;
 use serde_json::Value;
 
 /// String tokens
-/// 
-/// 
+///
+///
 /// # Example
-/// 
+///
 /// ```
 /// use titanrt::utils::str_tokens::StringTokens;
-/// 
+///
 /// let mut tokens = StringTokens::parse("a.b.c");
 /// assert_eq!(tokens.len(), 3);
 /// assert_eq!(tokens.by_index(0), Some("a"));
 /// assert_eq!(tokens.by_index(1), Some("b"));
 /// assert_eq!(tokens.by_index(2), Some("c"));
-/// 
+///
 /// tokens.set_alias("first".to_string(), 0);
 /// assert_eq!(tokens.by_alias("a"), Some("a"));
-/// 
+///
 /// assert_eq!(tokens.by_alias("d"), None);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StringTokens {
     segments: Vec<String>,
     aliases: AHashMap<String, usize>,
@@ -84,13 +84,13 @@ impl StringTokens {
 
     /// Select a value from a JSON object or array by tokens
     /// Returns `None` if the value is not found
-    /// 
+    ///
     /// # Example
-    /// 
+    ///
     /// ```
     /// use titanrt::utils::str_tokens::StringTokens;
     /// use serde_json::json;
-    /// 
+    ///
     /// let tokens = StringTokens::parse("a.b.c");
     /// let value = json!({"a": {"b": {"c": 1}}});
     /// assert_eq!(tokens.select_json(&value), Some(&json!(1)));

@@ -1,10 +1,9 @@
 use crate::utils::StringTokens;
-use regex::Regex;
 use serde_json::Value;
 use std::collections::HashSet;
 
 /// Matchers used to filter routes based on labels and nested payload fields.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RouteMatcher {
     /// Always returns true regardless of the input.
     Always,
@@ -22,8 +21,6 @@ pub enum RouteMatcher {
     LabelSuffix(String),
     /// Matches when the label contains the provided substring (case-insensitive).
     LabelContains(String),
-    /// Matches when the label satisfies the provided regular expression.
-    LabelRegex(Regex),
 
     /// Matches when the payload has any value at the provided JSON path.
     PayloadPathExists { path: StringTokens },
@@ -70,11 +67,6 @@ impl RouteMatcher {
     /// Creates a matcher that succeeds when the label contains the provided substring.
     pub fn label_contains(substr: impl Into<String>) -> Self {
         RouteMatcher::LabelContains(substr.into().to_ascii_lowercase())
-    }
-
-    /// Creates a matcher that succeeds when the label matches the provided regular expression.
-    pub fn label_regex(re: Regex) -> Self {
-        RouteMatcher::LabelRegex(re)
     }
 
     /// Creates a matcher that succeeds when the payload contains any value at the provided path.
@@ -138,7 +130,6 @@ impl RouteMatcher {
                 .map(|v| v.to_ascii_lowercase())
                 .map(|v| v.contains(substr))
                 .unwrap_or(false),
-            RouteMatcher::LabelRegex(re) => label.map(|v| re.is_match(v)).unwrap_or(false),
 
             RouteMatcher::PayloadPathExists { path } => {
                 payload.and_then(|x| path.select_json(x)).is_some()
