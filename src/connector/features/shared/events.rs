@@ -49,7 +49,7 @@ impl StreamEventInner for NoInner {
 /// Событие стрима — приватные поля, геттеры и билдер.
 /// Поля не навязывают Send/Sync — добавляй bounds там, где требуется.
 #[derive(Debug)]
-pub struct StreamEvent<Inner>
+pub struct StreamEventRaw<Inner>
 where
     Inner: StreamEventInner,
 {
@@ -61,7 +61,7 @@ where
     timestamp_us: u64,
 }
 
-impl<Inner> StreamEvent<Inner>
+impl<Inner> StreamEventRaw<Inner>
 where
     Inner: StreamEventInner,
 {
@@ -199,12 +199,12 @@ where
         self
     }
 
-    pub fn build(self) -> anyhow::Result<StreamEvent<Inner>> {
+    pub fn build(self) -> anyhow::Result<StreamEventRaw<Inner>> {
         if self.inner.is_none() {
             return Err(anyhow::anyhow!("StreamEvent Inner is None"));
         }
 
-        Ok(StreamEvent {
+        Ok(StreamEventRaw {
             inner: self.inner.unwrap(),
             conn_id: self.conn_id,
             req_id: self.req_id,
@@ -216,7 +216,7 @@ where
 }
 
 /// Условный Clone: только если Inner: Clone
-impl<Inner> Clone for StreamEvent<Inner>
+impl<Inner> Clone for StreamEventRaw<Inner>
 where
     Inner: StreamEventInner + Clone,
 {
@@ -276,7 +276,7 @@ mod tests {
 
         let req_id = Uuid::new_v4();
 
-        let ev = StreamEvent::builder(Some(inner))
+        let ev = StreamEventRaw::builder(Some(inner))
             .conn_id(Some(7))
             .req_id(Some(req_id))
             .label(Some("stream:event"))
@@ -304,7 +304,7 @@ mod tests {
             body: Some("ok2".to_string()),
         };
 
-        let ev = StreamEvent::builder(Some(inner))
+        let ev = StreamEventRaw::builder(Some(inner))
             .label(Some("l"))
             .build()
             .unwrap();
@@ -316,7 +316,9 @@ mod tests {
 
     #[test]
     fn build_no_inner() {
-        let ev = StreamEvent::<NoInner>::builder(None).build().unwrap_err();
+        let ev = StreamEventRaw::<NoInner>::builder(None)
+            .build()
+            .unwrap_err();
         assert_eq!(ev.to_string(), "inner is None");
     }
 }

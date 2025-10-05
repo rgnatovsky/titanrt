@@ -126,7 +126,7 @@ mod tests {
                         GrpcUnaryCall,
                     },
                 },
-                shared::{clients_map::SpecificClient, events::StreamEvent},
+                shared::{clients_map::SpecificClient, events::StreamEventRaw},
             },
         },
         io::ringbuffer::RingSender,
@@ -249,7 +249,7 @@ mod tests {
 
     pub fn streaming_geyser_hook(
         args: HookArgs<
-            StreamEvent<GrpcEvent>,
+            StreamEventRaw<GrpcEvent>,
             RingSender<()>,
             NullReducer,
             NullState,
@@ -323,7 +323,7 @@ mod tests {
 
     pub fn test_unary_hook(
         args: HookArgs<
-            StreamEvent<GrpcEvent>,
+            StreamEventRaw<GrpcEvent>,
             RingSender<()>,
             NullReducer,
             NullState,

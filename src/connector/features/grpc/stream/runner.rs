@@ -12,9 +12,9 @@ use crate::connector::features::grpc::stream::handle_server::start_server_stream
 use crate::connector::features::grpc::stream::utils::{
     ActiveStream, StreamContext, StreamLifecycle, emit_event,
 };
-use crate::connector::features::shared::actions::StreamAction;
+use crate::connector::features::shared::actions::StreamActionRaw;
 use crate::connector::features::shared::clients_map::ClientsMap;
-use crate::connector::features::shared::events::StreamEvent;
+use crate::connector::features::shared::events::StreamEventRaw;
 use crate::connector::features::shared::rate_limiter::RateLimitManager;
 use crate::connector::{Hook, HookArgs, IntoHook, RuntimeCtx, StreamRunner, StreamSpawner};
 use crate::io::ringbuffer::RingSender;
@@ -52,8 +52,8 @@ where
     T: Debug + Clone + Send + 'static,
 {
     type Config = (ClientsMap<GrpcClient, GrpcChannelSpec>, Arc<Runtime>);
-    type ActionTx = RingSender<StreamAction<GrpcCommand>>;
-    type RawEvent = StreamEvent<GrpcEvent>;
+    type ActionTx = RingSender<StreamActionRaw<GrpcCommand>>;
+    type RawEvent = StreamEventRaw<GrpcEvent>;
     type HookResult = ();
 
     fn build_config(&mut self, _desc: &GrpcDescriptor<T>) -> anyhow::Result<Self::Config> {
@@ -64,7 +64,7 @@ where
         mut ctx: RuntimeCtx<
             (ClientsMap<GrpcClient, GrpcChannelSpec>, Arc<Runtime>),
             GrpcDescriptor<T>,
-            RingSender<StreamAction<GrpcCommand>>,
+            RingSender<StreamActionRaw<GrpcCommand>>,
             E,
             R,
             S,
@@ -73,7 +73,7 @@ where
         hook: H,
     ) -> StreamResult<()>
     where
-        H: IntoHook<StreamEvent<GrpcEvent>, E, R, S, GrpcDescriptor<T>, (), T>,
+        H: IntoHook<StreamEventRaw<GrpcEvent>, E, R, S, GrpcDescriptor<T>, (), T>,
         E: TxPairExt,
         S: StateMarker,
     {
@@ -410,7 +410,7 @@ where
                     GrpcCommand::Unary(call) => {
                         let conn_id = maybe_conn_id.unwrap_or(clients_map.len());
 
-                        let mut sync_err_builder = StreamEvent::builder(None)
+                        let mut sync_err_builder = StreamEventRaw::builder(None)
                             .conn_id(Some(conn_id))
                             .req_id(req_id)
                             .label(label.clone());
@@ -449,7 +449,7 @@ where
                         };
 
                         local.spawn_local(async move {
-                            let mut builder = StreamEvent::builder(None)
+                            let mut builder = StreamEventRaw::builder(None)
                                 .conn_id(Some(conn_id))
                                 .req_id(req_id)
                                 .label(label_task);

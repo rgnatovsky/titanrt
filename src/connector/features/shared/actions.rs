@@ -103,8 +103,8 @@ impl<Inner> StreamActionBuilder<Inner> {
     }
 
     /// finalize build
-    pub fn build(self) -> StreamAction<Inner> {
-        StreamAction {
+    pub fn build(self) -> StreamActionRaw<Inner> {
+        StreamActionRaw {
             inner: self.inner,
             conn_id: self.conn_id,
             req_id: self.req_id,
@@ -120,7 +120,7 @@ impl<Inner> StreamActionBuilder<Inner> {
 /// StreamAction holds a spec + optional metadata.
 /// Поля сделаны приватными — используйте геттеры.
 #[derive(Debug, Deserialize, Serialize)]
-pub struct StreamAction<Inner> {
+pub struct StreamActionRaw<Inner> {
     inner: Option<Inner>,
     conn_id: Option<usize>,
     req_id: Option<Uuid>,
@@ -131,7 +131,7 @@ pub struct StreamAction<Inner> {
     json: Option<Value>,
 }
 
-impl<Inner> StreamAction<Inner> {
+impl<Inner> StreamActionRaw<Inner> {
     /// Create a builder
     pub fn builder(inner: Option<Inner>) -> StreamActionBuilder<Inner> {
         StreamActionBuilder::new(inner)
@@ -211,7 +211,7 @@ impl<Inner> StreamAction<Inner> {
 }
 
 // conditional Clone: только если Inner: Clone
-impl<Inner: Clone> Clone for StreamAction<Inner> {
+impl<Inner: Clone> Clone for StreamActionRaw<Inner> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),

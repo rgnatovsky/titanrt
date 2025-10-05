@@ -1,4 +1,4 @@
-use crate::connector::features::shared::events::StreamEvent;
+use crate::connector::features::shared::events::StreamEventRaw;
 use crate::connector::features::grpc::stream::GrpcStreamMode;
 use crate::connector::features::grpc::stream::event::GrpcEvent;
 
@@ -39,14 +39,14 @@ pub struct StreamContext {
 }
 
 pub fn emit_event(
-    sender: &Sender<StreamEvent<GrpcEvent>>,
+    sender: &Sender<StreamEventRaw<GrpcEvent>>,
     conn_id: Option<usize>,
     req_id: Option<Uuid>,
     label: Option<Cow<'static, str>>,
     payload: Option<&Value>,
     inner: GrpcEvent,
 ) {
-    let mut builder = StreamEvent::builder(Some(inner))
+    let mut builder = StreamEventRaw::builder(Some(inner))
         .conn_id(conn_id)
         .req_id(req_id)
         .label(label);

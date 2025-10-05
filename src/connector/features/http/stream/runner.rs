@@ -4,9 +4,9 @@ use crate::connector::features::http::connector::HttpConnector;
 use crate::connector::features::http::stream::actions::HttpAction;
 use crate::connector::features::http::stream::descriptor::HttpDescriptor;
 use crate::connector::features::http::stream::event::HttpEvent;
-use crate::connector::features::shared::actions::StreamAction;
+use crate::connector::features::shared::actions::StreamActionRaw;
 use crate::connector::features::shared::clients_map::ClientsMap;
-use crate::connector::features::shared::events::StreamEvent;
+use crate::connector::features::shared::events::StreamEventRaw;
 use crate::connector::features::shared::rate_limiter::RateLimitManager;
 use crate::connector::{Hook, HookArgs, IntoHook, RuntimeCtx, StreamRunner, StreamSpawner};
 use crate::io::ringbuffer::RingSender;
@@ -39,8 +39,8 @@ where
     T: Debug + Clone + Send + 'static,
 {
     type Config = ClientsMap<ReqwestClient, ReqwestClientSpec>;
-    type ActionTx = RingSender<StreamAction<HttpAction>>;
-    type RawEvent = StreamEvent<HttpEvent>;
+    type ActionTx = RingSender<StreamActionRaw<HttpAction>>;
+    type RawEvent = StreamEventRaw<HttpEvent>;
     type HookResult = ();
 
     fn build_config(&mut self, _desc: &HttpDescriptor<T>) -> anyhow::Result<Self::Config> {
@@ -51,7 +51,7 @@ where
         mut ctx: RuntimeCtx<
             ClientsMap<ReqwestClient, ReqwestClientSpec>,
             HttpDescriptor<T>,
-            RingSender<StreamAction<HttpAction>>,
+            RingSender<StreamActionRaw<HttpAction>>,
             E,
             R,
             S,
@@ -60,7 +60,7 @@ where
         hook: H,
     ) -> StreamResult<()>
     where
-        H: IntoHook<StreamEvent<HttpEvent>, E, R, S, HttpDescriptor<T>, (), T>,
+        H: IntoHook<StreamEventRaw<HttpEvent>, E, R, S, HttpDescriptor<T>, (), T>,
         E: TxPairExt,
         S: StateMarker,
     {
@@ -104,7 +104,7 @@ where
                     Ok(request) => request,
                     Err(e) => {
                         let inner = HttpEvent::from_error(e);
-                        let stream_event = StreamEvent::builder(None)
+                        let stream_event = StreamEventRaw::builder(None)
                             .conn_id(action.conn_id())
                             .req_id(action.req_id())
                             .label(action.label_take())
@@ -144,7 +144,7 @@ where
                         Err(e) => HttpEvent::from_error(e),
                     };
 
-                    let stream_event = StreamEvent::builder(None)
+                    let stream_event = StreamEventRaw::builder(None)
                         .conn_id(action.conn_id())
                         .req_id(action.req_id())
                         .label(action.label_take())

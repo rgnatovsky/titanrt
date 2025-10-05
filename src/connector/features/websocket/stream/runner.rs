@@ -27,9 +27,9 @@ use tungstenite::protocol::WebSocketConfig;
 use uuid::Uuid;
 
 use crate::connector::errors::{StreamError, StreamResult};
-use crate::connector::features::shared::actions::StreamAction;
+use crate::connector::features::shared::actions::StreamActionRaw;
 use crate::connector::features::shared::clients_map::ClientsMap;
-use crate::connector::features::shared::events::StreamEvent;
+use crate::connector::features::shared::events::StreamEventRaw;
 use crate::connector::features::shared::rate_limiter::RateLimitManager;
 use crate::connector::features::websocket::client::{WebSocketClient, WebSocketClientSpec};
 use crate::connector::features::websocket::connector::WebSocketConnector;
@@ -75,8 +75,8 @@ where
     T: Debug + Clone + Send + 'static,
 {
     type Config = ClientsMap<WebSocketClient, WebSocketClientSpec>;
-    type ActionTx = RingSender<StreamAction<WebSocketCommand>>;
-    type RawEvent = StreamEvent<WebSocketEvent>;
+    type ActionTx = RingSender<StreamActionRaw<WebSocketCommand>>;
+    type RawEvent = StreamEventRaw<WebSocketEvent>;
     type HookResult = ();
 
     fn build_config(
@@ -90,7 +90,7 @@ where
         mut ctx: RuntimeCtx<
             ClientsMap<WebSocketClient, WebSocketClientSpec>,
             WebSocketStreamDescriptor<T>,
-            RingSender<StreamAction<WebSocketCommand>>,
+            RingSender<StreamActionRaw<WebSocketCommand>>,
             E,
             R,
             S,
@@ -99,12 +99,12 @@ where
         hook: H,
     ) -> StreamResult<()>
     where
-        H: IntoHook<StreamEvent<WebSocketEvent>, E, R, S, WebSocketStreamDescriptor<T>, (), T>,
+        H: IntoHook<StreamEventRaw<WebSocketEvent>, E, R, S, WebSocketStreamDescriptor<T>, (), T>,
     {
         let mut hook = hook.into_hook();
         let wait_async_tasks = Duration::from_micros(ctx.desc.wait_async_tasks_us);
         let mut connections: AHashMap<usize, ConnectionHandle> = AHashMap::new();
-        let (res_tx, res_rx) = unbounded::<StreamEvent<WebSocketEvent>>();
+        let (res_tx, res_rx) = unbounded::<StreamEventRaw<WebSocketEvent>>();
 
         let rl_manager = Rc::new(Mutex::new(RateLimitManager::new(
             ctx.desc.rate_limits.clone(),
@@ -468,14 +468,14 @@ fn resolve_conn_id(
 }
 
 fn push_event(
-    tx: &Sender<StreamEvent<WebSocketEvent>>,
+    tx: &Sender<StreamEventRaw<WebSocketEvent>>,
     conn_id: usize,
     req_id: Option<Uuid>,
     label: Option<&Cow<'static, str>>,
     payload: Option<&Value>,
     inner: WebSocketEvent,
 ) {
-    let mut builder = StreamEvent::builder(Some(inner)).conn_id(Some(conn_id));
+    let mut builder = StreamEventRaw::builder(Some(inner)).conn_id(Some(conn_id));
     if let Some(req_id) = req_id {
         builder = builder.req_id(Some(req_id));
     }
@@ -543,7 +543,7 @@ async fn run_session(
     client: WebSocketClient,
     connect: WebSocketConnect,
     mut cmd_rx: tokio::sync::mpsc::UnboundedReceiver<WsTaskCommand>,
-    res_tx: Sender<StreamEvent<WebSocketEvent>>,
+    res_tx: Sender<StreamEventRaw<WebSocketEvent>>,
     cancel: CancelToken,
     initial_req_id: Option<Uuid>,
     label: Option<Cow<'static, str>>,

@@ -1,4 +1,4 @@
-use crate::connector::features::shared::events::StreamEvent;
+use crate::connector::features::shared::events::StreamEventRaw;
 use crate::connector::features::shared::rate_limiter::RateLimitManager;
 use crate::connector::features::grpc::codec::RawCodec;
 use crate::connector::features::grpc::stream::GrpcStreamMode;
@@ -25,7 +25,7 @@ pub fn start_client_stream(
     label: Option<Cow<'static, str>>,
     context: StreamContext,
     channel: Channel,
-    res_tx: Sender<StreamEvent<GrpcEvent>>,
+    res_tx: Sender<StreamEventRaw<GrpcEvent>>,
     lifecycle_tx: Sender<StreamLifecycle>,
     rl_manager: Option<Rc<Mutex<RateLimitManager>>>,
     rl_ctx: Option<Bytes>,
