@@ -4,6 +4,8 @@ mod slot;
 mod spawner;
 mod spec;
 mod wrapper;
+mod filter;
 pub use slot::{StreamSlot, StreamStatus};
 pub use spec::{StreamKind, StreamSpec};
 pub use wrapper::StreamWrapper;
+pub use filter::StreamFilter;
