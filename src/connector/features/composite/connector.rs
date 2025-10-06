@@ -186,6 +186,14 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
         self.reserved_core_ids.clone()
     }
 
+    pub fn event_tx(&self) -> &MpmcSender<StreamEvent<E>> {
+        &self.event_tx
+    }
+
+    pub fn event_tx_mut(&mut self) -> &mut MpmcSender<StreamEvent<E>> {
+        &mut self.event_tx
+    }
+
     /// Creates new stream slot
     /// Returns `Err` if the maximum number of streams is exceeded
     /// Returns `Ok(None)` if the stream was successfully created
