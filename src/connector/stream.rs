@@ -182,6 +182,11 @@ where
     pub fn action_tx(&self) -> &A {
         &self.action_tx
     }
+    /// Borrow the action TX half.
+    #[inline]
+    pub fn action_tx_mut(&mut self) -> &mut A {
+        &mut self.action_tx
+    }
 }
 
 impl<A, E, S> Stream<A, E, S>

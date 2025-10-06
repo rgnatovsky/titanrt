@@ -1,11 +1,14 @@
+mod action;
 pub mod event;
+mod filter;
 pub mod hooks;
 mod slot;
 mod spawner;
 mod spec;
 mod wrapper;
-mod filter;
+
+pub use action::CompositeAction;
+pub use filter::StreamFilter;
 pub use slot::{StreamSlot, StreamStatus};
 pub use spec::{StreamKind, StreamSpec};
 pub use wrapper::StreamWrapper;
-pub use filter::StreamFilter;

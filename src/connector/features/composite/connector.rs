@@ -11,7 +11,12 @@ use super::inner::ConnectorInner;
 use crate::connector::features::composite::ConnectorGuard;
 use crate::connector::features::composite::stream::event::{StreamEvent, StreamEventParsed};
 use crate::connector::features::composite::stream::{StreamSlot, StreamStatus, StreamWrapper};
+use crate::connector::features::grpc::stream::GrpcCommand;
+use crate::connector::features::http::stream::actions::HttpAction;
+use crate::connector::features::shared::actions::StreamActionRaw;
+use crate::connector::features::websocket::stream::WebSocketCommand;
 use crate::io::mpmc::MpmcSender;
+use crate::io::ringbuffer::RingSender;
 use crate::utils::time::Timeframe;
 use crate::utils::{CancelToken, SharedStr, StateCell};
 
@@ -186,6 +191,33 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
         self.reserved_core_ids.clone()
     }
 
+    pub fn http_sender_mut(
+        &mut self,
+        stream: &SharedStr,
+    ) -> Option<&mut RingSender<StreamActionRaw<HttpAction>>> {
+        self.stream_mut(stream)
+            .and_then(|s| s.get_http())
+            .map(|s| s.action_tx_mut())
+    }
+
+    pub fn grpc_sender_mut(
+        &mut self,
+        stream: &SharedStr,
+    ) -> Option<&mut RingSender<StreamActionRaw<GrpcCommand>>> {
+        self.stream_mut(stream)
+            .and_then(|s| s.get_grpc())
+            .map(|s| s.action_tx_mut())
+    }
+
+    pub fn ws_sender_mut(
+        &mut self,
+        stream: &SharedStr,
+    ) -> Option<&mut RingSender<StreamActionRaw<WebSocketCommand>>> {
+        self.stream_mut(stream)
+            .and_then(|s| s.get_ws())
+            .map(|s| s.action_tx_mut())
+    }
+
     pub fn event_tx(&self) -> &MpmcSender<StreamEvent<E>> {
         &self.event_tx
     }
@@ -271,10 +303,7 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
     /// Ensures that all streams are alive and spawn them if needed
     /// Returns list of errors and stream names
     /// Returns empty list if all streams are alive
-    pub fn ensure_all_streams(
-        &mut self,
-        force_enable: bool,
-    ) -> Vec<(SharedStr, anyhow::Error)> {
+    pub fn ensure_all_streams(&mut self, force_enable: bool) -> Vec<(SharedStr, anyhow::Error)> {
         if let Some(ensure_interval) = self.ensure_interval
             && self.last_ensure.elapsed() < ensure_interval
         {
