@@ -52,6 +52,7 @@ pub struct CompositeConnector<E: StreamEventParsed> {
     cancel_token: CancelToken,
     reserved_core_ids: Option<Vec<usize>>,
     slots: HashMap<SharedStr, StreamSlot<E>>,
+    pub(crate) event_tx: MpmcSender<StreamEvent<E>>,
     ensure_interval: Option<Duration>,
     max_streams: usize,
     last_ensure: Instant,
@@ -68,6 +69,7 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
         config: CompositeConnectorConfig,
         cancel_token: CancelToken,
         reserved_core_ids: Option<Vec<usize>>,
+        event_tx: MpmcSender<StreamEvent<E>>,
     ) -> Self {
         Self {
             #[cfg(feature = "ws_conn")]
@@ -78,6 +80,7 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
             grpc: ConnectorInner::new(config.grpc, config.cancel_streams_policy),
             cancel_token,
             reserved_core_ids,
+            event_tx,
             slots: HashMap::new(),
             ensure_interval: config.ensure_interval.map(|tf| tf.duration()),
             last_ensure: Instant::now(),
@@ -183,6 +186,10 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
         self.reserved_core_ids.clone()
     }
 
+    /// Creates new stream slot
+    /// Returns `Err` if the maximum number of streams is exceeded
+    /// Returns `Ok(None)` if the stream was successfully created
+    /// Returns `Ok(Some(old_slot))` if the stream was replaced
     pub fn new_slot(&mut self, slot: StreamSlot<E>) -> anyhow::Result<Option<StreamSlot<E>>> {
         if self.max_streams < self.slots.len() {
             let stream_name = slot.spec().name.clone();
@@ -195,64 +202,9 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
         }
     }
 
-    // pub fn initialize(
-    //     &mut self,
-    //     connector: &CompositeConnector,
-    //     event_tx: &MpmcSender<StreamEvent<E>>,
-    // ) -> anyhow::Result<()> {
-    //     let errors = self.ensure_all_enabled(connector, event_tx);
-    //     self.last_ensure = Instant::now();
-    //     if errors.is_empty() {
-    //         return Ok(());
-    //     }
-
-    //     let mut combined = String::new();
-    //     for (name, err) in errors {
-    //         combined.push_str(&format!("{}: {}\n", name.as_str(), err));
-    //     }
-    //     Err(anyhow!(
-    //         "failed to initialize streams:\n{}",
-    //         combined.trim_end()
-    //     ))
-    // }
-
-    pub fn ensure_all(
-        &mut self,
-        event_tx: &MpmcSender<StreamEvent<E>>,
-        force_enable: bool,
-    ) -> Vec<(SharedStr, anyhow::Error)> {
-        if let Some(ensure_interval) = self.ensure_interval
-            && self.last_ensure.elapsed() < ensure_interval
-        {
-            return Vec::new();
-        }
-
-        let mut errors = Vec::new();
-
-        let mut to_restart = Vec::with_capacity(5);
-        for (name, slot) in &self.slots {
-            if slot.enabled {
-                let needs_restart = match slot.stream.as_ref() {
-                    Some(s) if s.is_alive() => false,
-                    _ => true,
-                };
-                if needs_restart {
-                    to_restart.push(name.clone());
-                }
-            }
-        }
-
-        for name in to_restart {
-            if let Err(err) = self.ensure_stream(&name, event_tx, force_enable) {
-                errors.push((name, err));
-            }
-        }
-
-        self.last_ensure = Instant::now();
-
-        errors
-    }
-
+    /// Returns status of the stream
+    /// Returns `Err` if the stream is not found
+    /// Returns `None` if the stream is alive
     pub fn check_stream(&self, name: impl AsRef<str>) -> anyhow::Result<Option<StreamStatus>> {
         let slot = self
             .slots
@@ -277,10 +229,10 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
         Ok(None)
     }
 
+    /// Ensures that stream is alive and spawn it if needed
     pub fn ensure_stream(
         &mut self,
         name: impl AsRef<str>,
-        event_tx: &MpmcSender<StreamEvent<E>>,
         force_enable: bool,
     ) -> anyhow::Result<()> {
         let name = name.as_ref();
@@ -296,7 +248,7 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
                     old_stream.cancel();
                 }
 
-                let stream = self.spawn_stream(&slot, event_tx)?;
+                let stream = self.spawn_stream(&slot.spec, &slot.ctx)?;
 
                 slot.stream = Some(stream);
                 slot.last_error = None;
@@ -308,6 +260,44 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
         Ok(())
     }
 
+    /// Ensures that all streams are alive and spawn them if needed
+    /// Returns list of errors and stream names
+    /// Returns empty list if all streams are alive
+    pub fn ensure_all_streams(
+        &mut self,
+        force_enable: bool,
+    ) -> Vec<(SharedStr, anyhow::Error)> {
+        if let Some(ensure_interval) = self.ensure_interval
+            && self.last_ensure.elapsed() < ensure_interval
+        {
+            return Vec::new();
+        }
+
+        let mut errors = Vec::new();
+
+        let mut to_restart = Vec::with_capacity(5);
+
+        for name in self.slots.keys() {
+            let status = self.check_stream(name).unwrap();
+
+            if let Some(status) = status {
+                if !status.alive && (status.enabled || force_enable) {
+                    to_restart.push(name.clone());
+                }
+            }
+        }
+
+        for name in to_restart {
+            if let Err(err) = self.ensure_stream(&name, force_enable) {
+                errors.push((name, err));
+            }
+        }
+
+        self.last_ensure = Instant::now();
+
+        errors
+    }
+
     /// Returns mutable reference to the stream
     pub fn stream_mut(&mut self, name: &SharedStr) -> Option<&mut StreamWrapper<E>> {
         self.slots.get_mut(name).and_then(|slot| slot.stream_mut())
@@ -315,33 +305,34 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
 
     /// Returns status of the stream
     /// Returns `None` if the stream is not found
-    pub fn status(&self, name: impl AsRef<str>) -> Option<StreamStatus> {
+    pub fn stream_status(&self, name: impl AsRef<str>) -> Option<StreamStatus> {
         self.slots.get(name.as_ref()).map(|slot| slot.status())
     }
 
-    pub fn cancel_all(&mut self) {
+    /// Cancel all streams
+    pub fn cancel_all_streams(&mut self) {
         for slot in self.slots.values_mut() {
             slot.cancel();
         }
     }
 
-    pub fn http_state(&self, name: &SharedStr) -> Option<&StateCell<E::HttpState>> {
+    pub fn http_state(&self, stream: &SharedStr) -> Option<&StateCell<E::HttpState>> {
         self.slots
-            .get(name)
+            .get(stream)
             .and_then(|slot| slot.stream.as_ref())
             .and_then(|stream| stream.http_state())
     }
 
-    pub fn grpc_state(&self, name: &SharedStr) -> Option<&StateCell<E::GrpcState>> {
+    pub fn grpc_state(&self, stream: &SharedStr) -> Option<&StateCell<E::GrpcState>> {
         self.slots
-            .get(name)
+            .get(stream)
             .and_then(|slot| slot.stream.as_ref())
             .and_then(|stream| stream.grpc_state())
     }
 
-    pub fn ws_state(&self, name: &SharedStr) -> Option<&StateCell<E::WsState>> {
+    pub fn ws_state(&self, stream: &SharedStr) -> Option<&StateCell<E::WsState>> {
         self.slots
-            .get(name)
+            .get(stream)
             .and_then(|slot| slot.stream.as_ref())
             .and_then(|stream| stream.ws_state())
     }

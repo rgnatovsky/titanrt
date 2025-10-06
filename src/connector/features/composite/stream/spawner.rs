@@ -1,41 +1,37 @@
 use anyhow::{Context, anyhow};
 
-use crate::{
-    connector::{
-        BaseConnector, EventTxType,
-        features::composite::{
-            CompositeConnector,
-            stream::{
-                StreamKind, StreamSlot, StreamWrapper,
-                event::{StreamEvent, StreamEventParsed},
-                hooks::{grpc_hook, http_hook, ws_hook},
-            },
+use crate::connector::{
+    BaseConnector, EventTxType,
+    features::composite::{
+        CompositeConnector,
+        stream::{
+            StreamKind, StreamSpec, StreamWrapper,
+            event::{StreamEventContext, StreamEventParsed},
+            hooks::{grpc_hook, http_hook, ws_hook},
         },
     },
-    io::mpmc::MpmcSender,
 };
 
 impl<E: StreamEventParsed> CompositeConnector<E> {
     pub fn spawn_stream(
         &self,
-        slot: &StreamSlot<E>,
-        event_tx: &MpmcSender<StreamEvent<E>>,
+        spec: &StreamSpec,
+        ctx: &StreamEventContext<E>,
     ) -> anyhow::Result<StreamWrapper<E>>
     where
         E: StreamEventParsed,
     {
-        match slot.spec.kind {
+        match spec.kind {
             StreamKind::Http => {
-                let descriptor = slot
-                    .spec
-                    .maybe_http(&slot.ctx)
+                let descriptor = spec
+                    .maybe_http(&ctx)
                     .context("failed to build HTTP descriptor")?;
 
                 let stream = self
                     .with_http(|conn| {
                         conn.spawn_stream(
                             descriptor,
-                            EventTxType::External(event_tx.clone()),
+                            EventTxType::External(self.event_tx.clone()),
                             http_hook,
                         )
                     })?
@@ -44,16 +40,15 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
                 Ok(StreamWrapper::Http { stream })
             }
             StreamKind::Grpc => {
-                let descriptor = slot
-                    .spec
-                    .maybe_grpc(&slot.ctx)
+                let descriptor = spec
+                    .maybe_grpc(&ctx)
                     .context("failed to build gRPC descriptor")?;
 
                 let stream = self
                     .with_grpc(|conn| {
                         conn.spawn_stream(
                             descriptor,
-                            EventTxType::External(event_tx.clone()),
+                            EventTxType::External(self.event_tx.clone()),
                             grpc_hook,
                         )
                     })?
@@ -62,16 +57,15 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
                 Ok(StreamWrapper::Grpc { stream })
             }
             StreamKind::Ws => {
-                let descriptor = slot
-                    .spec
-                    .maybe_ws(&slot.ctx)
+                let descriptor = spec
+                    .maybe_ws(&ctx)
                     .context("failed to build WebSocket descriptor")?;
 
                 let stream = self
                     .with_websocket(|conn| {
                         conn.spawn_stream(
                             descriptor,
-                            EventTxType::External(event_tx.clone()),
+                            EventTxType::External(self.event_tx.clone()),
                             ws_hook,
                         )
                     })?
