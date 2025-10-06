@@ -15,6 +15,59 @@ use serde_json::Value;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use std::collections::HashMap;
+
+#[derive(Clone, Debug)]
+pub struct EventRouteRegistry<E> {
+    map: HashMap<SharedStr, Vec<StreamEventRoute<E>>>,
+}
+
+impl<E> EventRouteRegistry<E> {
+    pub fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+        }
+    }
+
+    pub fn add_route(
+        mut self,
+        stream_name: impl Into<SharedStr>,
+        route: StreamEventRoute<E>,
+    ) -> Self {
+        let stream_name = stream_name.into();
+        self.map
+            .entry(stream_name)
+            .or_insert_with(Vec::new)
+            .push(route);
+        self
+    }
+
+    pub fn add_routes(
+        mut self,
+        stream_name: impl Into<SharedStr>,
+        routes: Vec<StreamEventRoute<E>>,
+    ) -> Self {
+        let stream_name = stream_name.into();
+        self.map
+            .entry(stream_name)
+            .or_insert_with(Vec::new)
+            .extend(routes);
+        self
+    }
+
+    pub fn get_routes(&self, stream_name: &str) -> Option<&Vec<StreamEventRoute<E>>> {
+        self.map.get(stream_name)
+    }
+
+    pub fn get_routes_mut(&mut self, stream_name: &str) -> Option<&mut Vec<StreamEventRoute<E>>> {
+        self.map.get_mut(stream_name)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&SharedStr, &Vec<StreamEventRoute<E>>)> {
+        self.map.iter()
+    }
+}
+
 /// Context shared between stream events from hooks and strategies.
 #[derive(Debug, Clone)]
 pub struct StreamEventContext<E> {
