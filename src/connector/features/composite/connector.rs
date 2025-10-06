@@ -1,12 +1,19 @@
-use std::ops::{Deref, DerefMut};
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 use std::vec::Vec;
 
-use anyhow::Result;
-use parking_lot::{Mutex, MutexGuard, RwLock};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use crate::connector::BaseConnector;
-use crate::utils::CancelToken;
+#[cfg(feature = "ws_conn")]
+use super::inner::ConnectorInner;
+#[cfg(feature = "ws_conn")]
+use crate::connector::features::composite::ConnectorGuard;
+use crate::connector::features::composite::stream::event::{StreamEvent, StreamEventParsed};
+use crate::connector::features::composite::stream::{StreamSlot, StreamStatus, StreamWrapper};
+use crate::io::mpmc::MpmcSender;
+use crate::utils::time::Timeframe;
+use crate::utils::{CancelToken, SharedStr, StateCell};
 
 #[cfg(feature = "grpc_conn")]
 use crate::connector::features::grpc::connector::{GrpcConnector, GrpcConnectorConfig};
@@ -35,20 +42,28 @@ pub struct CompositeConnectorConfig {
     pub grpc: Option<GrpcConnectorConfig>,
     #[serde(default)]
     pub cancel_streams_policy: CancelStreamsPolicy,
+    #[serde(default)]
+    pub max_streams: Option<usize>,
+    #[serde(default)]
+    pub ensure_interval: Option<Timeframe>,
 }
 
-pub struct CompositeConnector {
+pub struct CompositeConnector<E: StreamEventParsed> {
     cancel_token: CancelToken,
     reserved_core_ids: Option<Vec<usize>>,
+    slots: HashMap<SharedStr, StreamSlot<E>>,
+    ensure_interval: Option<Duration>,
+    max_streams: usize,
+    last_ensure: Instant,
     #[cfg(feature = "ws_conn")]
-    websocket: ConnectorSlot<WebSocketConnector>,
+    websocket: ConnectorInner<WebSocketConnector>,
     #[cfg(feature = "http_conn")]
-    http: ConnectorSlot<HttpConnector>,
+    http: ConnectorInner<HttpConnector>,
     #[cfg(feature = "grpc_conn")]
-    grpc: ConnectorSlot<GrpcConnector>,
+    grpc: ConnectorInner<GrpcConnector>,
 }
 
-impl CompositeConnector {
+impl<E: StreamEventParsed> CompositeConnector<E> {
     pub fn new(
         config: CompositeConnectorConfig,
         cancel_token: CancelToken,
@@ -56,16 +71,19 @@ impl CompositeConnector {
     ) -> Self {
         Self {
             #[cfg(feature = "ws_conn")]
-            websocket: ConnectorSlot::new(config.websocket, config.cancel_streams_policy),
+            websocket: ConnectorInner::new(config.websocket, config.cancel_streams_policy),
             #[cfg(feature = "http_conn")]
-            http: ConnectorSlot::new(config.http, config.cancel_streams_policy),
+            http: ConnectorInner::new(config.http, config.cancel_streams_policy),
             #[cfg(feature = "grpc_conn")]
-            grpc: ConnectorSlot::new(config.grpc, config.cancel_streams_policy),
+            grpc: ConnectorInner::new(config.grpc, config.cancel_streams_policy),
             cancel_token,
             reserved_core_ids,
+            slots: HashMap::new(),
+            ensure_interval: config.ensure_interval.map(|tf| tf.duration()),
+            last_ensure: Instant::now(),
+            max_streams: config.max_streams.unwrap_or(usize::MAX),
         }
     }
-
 
     #[cfg(feature = "ws_conn")]
     pub fn websocket(&self) -> Result<Option<ConnectorGuard<'_, WebSocketConnector>>> {
@@ -89,7 +107,7 @@ impl CompositeConnector {
     }
 
     #[cfg(feature = "http_conn")]
-    pub fn with_reqwest<F, R>(&self, f: F) -> Result<Option<R>>
+    pub fn with_http<F, R>(&self, f: F) -> Result<Option<R>>
     where
         F: FnOnce(&mut HttpConnector) -> Result<R>,
     {
@@ -104,7 +122,7 @@ impl CompositeConnector {
     }
 
     #[cfg(feature = "grpc_conn")]
-    pub fn with_tonic<F, R>(&self, f: F) -> Result<Option<R>>
+    pub fn with_grpc<F, R>(&self, f: F) -> Result<Option<R>>
     where
         F: FnOnce(&mut GrpcConnector) -> Result<R>,
     {
@@ -164,161 +182,167 @@ impl CompositeConnector {
     pub fn reserved_core_ids(&self) -> Option<Vec<usize>> {
         self.reserved_core_ids.clone()
     }
-}
 
-struct ConnectorSlot<C>
-where
-    C: BaseConnector,
-{
-    config: RwLock<Option<C::MainConfig>>,
-    instance: Mutex<Option<C>>,
-    cancel_streams: CancelStreamsPolicy,
-}
+    pub fn new_slot(&mut self, slot: StreamSlot<E>) -> anyhow::Result<Option<StreamSlot<E>>> {
+        if self.max_streams < self.slots.len() {
+            let stream_name = slot.spec().name.clone();
 
-impl<C> ConnectorSlot<C>
-where
-    C: BaseConnector,
-{
-    fn new(config: Option<C::MainConfig>, cancel_streams: CancelStreamsPolicy) -> Self {
-        Self {
-            config: RwLock::new(config),
-            instance: Mutex::new(None),
-            cancel_streams,
+            let old_slot = self.slots.insert(stream_name.clone(), slot);
+
+            return Ok(old_slot);
+        } else {
+            return Err(anyhow!("too many streams"));
         }
     }
 
-    fn update_config(&self, config: Option<C::MainConfig>) {
+    // pub fn initialize(
+    //     &mut self,
+    //     connector: &CompositeConnector,
+    //     event_tx: &MpmcSender<StreamEvent<E>>,
+    // ) -> anyhow::Result<()> {
+    //     let errors = self.ensure_all_enabled(connector, event_tx);
+    //     self.last_ensure = Instant::now();
+    //     if errors.is_empty() {
+    //         return Ok(());
+    //     }
+
+    //     let mut combined = String::new();
+    //     for (name, err) in errors {
+    //         combined.push_str(&format!("{}: {}\n", name.as_str(), err));
+    //     }
+    //     Err(anyhow!(
+    //         "failed to initialize streams:\n{}",
+    //         combined.trim_end()
+    //     ))
+    // }
+
+    pub fn ensure_all(
+        &mut self,
+        event_tx: &MpmcSender<StreamEvent<E>>,
+        force_enable: bool,
+    ) -> Vec<(SharedStr, anyhow::Error)> {
+        if let Some(ensure_interval) = self.ensure_interval
+            && self.last_ensure.elapsed() < ensure_interval
         {
-            let mut guard = self.config.write();
-            *guard = config;
+            return Vec::new();
         }
-        self.drop_instance();
-    }
 
-    fn unload(&self) {
-        self.drop_instance();
-    }
+        let mut errors = Vec::new();
 
-    fn drop_instance(&self) {
-        let mut guard = self.instance.lock();
-        match self.cancel_streams {
-            CancelStreamsPolicy::OnInstanceDrop => {
-                if let Some(connector) = guard.as_mut() {
-                    connector.cancel_token().cancel();
+        let mut to_restart = Vec::with_capacity(5);
+        for (name, slot) in &self.slots {
+            if slot.enabled {
+                let needs_restart = match slot.stream.as_ref() {
+                    Some(s) if s.is_alive() => false,
+                    _ => true,
+                };
+                if needs_restart {
+                    to_restart.push(name.clone());
                 }
             }
-            CancelStreamsPolicy::Ignore => {}
         }
-        *guard = None;
+
+        for name in to_restart {
+            if let Err(err) = self.ensure_stream(&name, event_tx, force_enable) {
+                errors.push((name, err));
+            }
+        }
+
+        self.last_ensure = Instant::now();
+
+        errors
     }
 
-    fn config_snapshot(&self) -> Option<C::MainConfig> {
-        self.config.read().clone()
-    }
+    pub fn check_stream(&self, name: impl AsRef<str>) -> anyhow::Result<Option<StreamStatus>> {
+        let slot = self
+            .slots
+            .get(name.as_ref())
+            .ok_or_else(|| anyhow!("unknown stream {}", name.as_ref()))?;
 
-    fn ensure(
-        &self,
-        cancel_token: &CancelToken,
-        reserved_core_ids: &Option<Vec<usize>>,
-    ) -> Result<Option<ConnectorGuard<'_, C>>> {
-        let config = { self.config.read().clone() };
+        // Если стрим отключен - возвращаем статус, не запускаем
+        if !slot.enabled {
+            return Ok(Some(slot.status()));
+        }
 
-        let Some(config) = config else {
-            return Ok(None);
+        let needs_restart = match slot.stream.as_ref() {
+            Some(stream) if stream.is_alive() => false,
+            Some(_) => true,
+            None => true,
         };
 
-        if let Some(guard) = self.try_get_existing() {
-            return Ok(Some(guard));
+        if needs_restart {
+            return Ok(Some(slot.status()));
         }
 
-        let connector = C::init(config, cancel_token.clone(), reserved_core_ids.clone())?;
-        let mut guard = self.instance.lock();
-        if guard.is_none() {
-            *guard = Some(connector);
-            return Ok(Some(ConnectorGuard::new(guard)));
-        }
-
-        drop(connector);
-        Ok(Some(ConnectorGuard::new(guard)))
+        Ok(None)
     }
 
-    fn with<F, R>(
-        &self,
-        cancel_token: &CancelToken,
-        reserved_core_ids: &Option<Vec<usize>>,
-        f: F,
-    ) -> Result<Option<R>>
-    where
-        F: FnOnce(&mut C) -> Result<R>,
-    {
-        match self.ensure(cancel_token, reserved_core_ids)? {
-            Some(mut guard) => {
-                let out = f(&mut guard)?;
-                Ok(Some(out))
-            }
-            None => Ok(None),
-        }
-    }
+    pub fn ensure_stream(
+        &mut self,
+        name: impl AsRef<str>,
+        event_tx: &MpmcSender<StreamEvent<E>>,
+        force_enable: bool,
+    ) -> anyhow::Result<()> {
+        let name = name.as_ref();
+        let status = self.check_stream(name)?;
 
-    fn try_get_existing(&self) -> Option<ConnectorGuard<'_, C>> {
-        let guard = self.instance.lock();
-        if guard.is_some() {
-            Some(ConnectorGuard::new(guard))
-        } else {
-            None
-        }
-    }
-}
+        if let Some(status) = status {
+            if (status.enabled || force_enable) && !status.alive {
+                let mut slot = self.slots.remove(name).unwrap();
 
-impl<C> Drop for ConnectorSlot<C>
-where
-    C: BaseConnector,
-{
-    fn drop(&mut self) {
-        match self.cancel_streams {
-            CancelStreamsPolicy::OnInstanceDrop => {
-                if let Some(connector) = self.instance.get_mut().take() {
-                    connector.cancel_token().cancel();
+                slot.enabled = true;
+
+                if let Some(mut old_stream) = slot.stream.take() {
+                    old_stream.cancel();
                 }
+
+                let stream = self.spawn_stream(&slot, event_tx)?;
+
+                slot.stream = Some(stream);
+                slot.last_error = None;
+
+                self.slots.insert(name.into(), slot);
             }
-            CancelStreamsPolicy::Ignore => return,
+        }
+
+        Ok(())
+    }
+
+    /// Returns mutable reference to the stream
+    pub fn stream_mut(&mut self, name: &SharedStr) -> Option<&mut StreamWrapper<E>> {
+        self.slots.get_mut(name).and_then(|slot| slot.stream_mut())
+    }
+
+    /// Returns status of the stream
+    /// Returns `None` if the stream is not found
+    pub fn status(&self, name: impl AsRef<str>) -> Option<StreamStatus> {
+        self.slots.get(name.as_ref()).map(|slot| slot.status())
+    }
+
+    pub fn cancel_all(&mut self) {
+        for slot in self.slots.values_mut() {
+            slot.cancel();
         }
     }
-}
 
-pub struct ConnectorGuard<'a, C>
-where
-    C: BaseConnector,
-{
-    guard: MutexGuard<'a, Option<C>>,
-}
-
-impl<'a, C> ConnectorGuard<'a, C>
-where
-    C: BaseConnector,
-{
-    fn new(guard: MutexGuard<'a, Option<C>>) -> Self {
-        debug_assert!(guard.is_some(), "Connector guard must hold a value");
-        Self { guard }
+    pub fn http_state(&self, name: &SharedStr) -> Option<&StateCell<E::HttpState>> {
+        self.slots
+            .get(name)
+            .and_then(|slot| slot.stream.as_ref())
+            .and_then(|stream| stream.http_state())
     }
-}
 
-impl<'a, C> Deref for ConnectorGuard<'a, C>
-where
-    C: BaseConnector,
-{
-    type Target = C;
-
-    fn deref(&self) -> &Self::Target {
-        self.guard.as_ref().expect("Connector is uninitialized")
+    pub fn grpc_state(&self, name: &SharedStr) -> Option<&StateCell<E::GrpcState>> {
+        self.slots
+            .get(name)
+            .and_then(|slot| slot.stream.as_ref())
+            .and_then(|stream| stream.grpc_state())
     }
-}
 
-impl<'a, C> DerefMut for ConnectorGuard<'a, C>
-where
-    C: BaseConnector,
-{
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.guard.as_mut().expect("Connector is uninitialized")
+    pub fn ws_state(&self, name: &SharedStr) -> Option<&StateCell<E::WsState>> {
+        self.slots
+            .get(name)
+            .and_then(|slot| slot.stream.as_ref())
+            .and_then(|stream| stream.ws_state())
     }
 }
