@@ -1,9 +1,12 @@
+use std::collections::HashMap;
+
 use crate::connector::features::composite::stream::event::{StreamEventContext, StreamEventParsed};
 use crate::connector::features::grpc::stream::GrpcDescriptor;
 use crate::connector::features::http::stream::descriptor::HttpDescriptor;
 use crate::connector::features::shared::rate_limiter::RateLimitConfig;
 use crate::connector::features::websocket::stream::WebSocketStreamDescriptor;
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::utils::{CorePickPolicy, SharedStr};
 
@@ -29,6 +32,8 @@ pub struct StreamSpec {
     pub max_decoding_message_size: Option<usize>,
     #[serde(default)]
     pub max_encoding_message_size: Option<usize>,
+    #[serde(default)]
+    pub metadata: HashMap<String, Value>,
 }
 
 fn default_wait_async_task() -> u64 {
@@ -58,6 +63,12 @@ impl AsRef<str> for StreamKind {
 }
 
 impl StreamSpec {
+    pub fn get_context<E: StreamEventParsed>(&self) -> StreamEventContext<E> {
+        let mut ctx = StreamEventContext::new(self.name.as_str());
+        ctx.set_metadata(self.metadata.clone());
+        ctx
+    }
+
     pub fn maybe_http<E: StreamEventParsed>(
         &self,
         payload: &StreamEventContext<E>,

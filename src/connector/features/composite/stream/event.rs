@@ -10,7 +10,6 @@ use crate::{
     },
     utils::{NullReducer, NullState},
 };
-use ahash::AHashMap;
 use serde_json::Value;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -74,14 +73,14 @@ pub struct StreamEventContext<E> {
     stream: SharedStr,
     routes: Vec<StreamEventRoute<E>>,
     tokens: StringTokens,
-    metadata: AHashMap<String, Value>,
+    metadata: HashMap<String, Value>,
 }
 
 impl<E> StreamEventContext<E> {
-    pub fn new(stream: &str) -> anyhow::Result<Self> {
+    pub fn new(stream: &str) -> Self {
         let tokens = StringTokens::parse(stream);
 
-        let metadata = AHashMap::new();
+        let metadata = HashMap::new();
 
         let ctx = StreamEventContext {
             stream: stream.into(),
@@ -90,7 +89,7 @@ impl<E> StreamEventContext<E> {
             metadata,
         };
 
-        Ok(ctx)
+        ctx
     }
     /// Stream identifier (stable within runtime).
     #[inline]
@@ -111,14 +110,20 @@ impl<E> StreamEventContext<E> {
 
     /// Snapshot of global metadata.
     #[inline]
-    pub fn metadata(&self) -> &AHashMap<String, Value> {
+    pub fn metadata(&self) -> &HashMap<String, Value> {
         &self.metadata
+    }
+
+    /// Snapshot of global metadata.
+    #[inline]
+    pub fn set_metadata(&mut self, metadata: HashMap<String, Value>) {
+        self.metadata = metadata;
     }
 
     /// Mutate global metadata in-place.
     pub fn update_metadata<F>(&mut self, update: F)
     where
-        F: FnOnce(&mut AHashMap<String, Value>),
+        F: FnOnce(&mut HashMap<String, Value>),
     {
         update(&mut self.metadata);
     }
