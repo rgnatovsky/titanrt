@@ -193,7 +193,7 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
 
     pub fn http_sender_mut(
         &mut self,
-        stream: &SharedStr,
+        stream: impl AsRef<str>,
     ) -> Option<&mut RingSender<StreamActionRaw<HttpAction>>> {
         self.stream_mut(stream)
             .and_then(|s| s.get_http())
@@ -202,7 +202,7 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
 
     pub fn grpc_sender_mut(
         &mut self,
-        stream: &SharedStr,
+        stream: impl AsRef<str>,
     ) -> Option<&mut RingSender<StreamActionRaw<GrpcCommand>>> {
         self.stream_mut(stream)
             .and_then(|s| s.get_grpc())
@@ -211,7 +211,7 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
 
     pub fn ws_sender_mut(
         &mut self,
-        stream: &SharedStr,
+        stream: impl AsRef<str>,
     ) -> Option<&mut RingSender<StreamActionRaw<WebSocketCommand>>> {
         self.stream_mut(stream)
             .and_then(|s| s.get_ws())
@@ -336,8 +336,8 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
     }
 
     /// Returns mutable reference to the stream
-    pub fn stream_mut(&mut self, name: &SharedStr) -> Option<&mut StreamWrapper<E>> {
-        self.slots.get_mut(name).and_then(|slot| slot.stream_mut())
+    pub fn stream_mut(&mut self, name: impl AsRef<str>) -> Option<&mut StreamWrapper<E>> {
+        self.slots.get_mut(name.as_ref()).and_then(|slot| slot.stream_mut())
     }
 
     /// Returns status of the stream
@@ -353,23 +353,23 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
         }
     }
 
-    pub fn http_state(&self, stream: &SharedStr) -> Option<&StateCell<E::HttpState>> {
+    pub fn http_state(&self, stream: impl AsRef<str>) -> Option<&StateCell<E::HttpState>> {
         self.slots
-            .get(stream)
+            .get(stream.as_ref())
             .and_then(|slot| slot.stream.as_ref())
             .and_then(|stream| stream.http_state())
     }
 
-    pub fn grpc_state(&self, stream: &SharedStr) -> Option<&StateCell<E::GrpcState>> {
+    pub fn grpc_state(&self, stream: impl AsRef<str>) -> Option<&StateCell<E::GrpcState>> {
         self.slots
-            .get(stream)
+            .get(stream.as_ref())
             .and_then(|slot| slot.stream.as_ref())
             .and_then(|stream| stream.grpc_state())
     }
 
-    pub fn ws_state(&self, stream: &SharedStr) -> Option<&StateCell<E::WsState>> {
+    pub fn ws_state(&self, stream: impl AsRef<str>) -> Option<&StateCell<E::WsState>> {
         self.slots
-            .get(stream)
+            .get(stream.as_ref())
             .and_then(|slot| slot.stream.as_ref())
             .and_then(|stream| stream.ws_state())
     }

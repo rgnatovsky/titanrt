@@ -31,8 +31,8 @@ impl StreamFilter {
     /// - Filter is empty (strategy accepts all streams), OR
     /// - Stream is explicitly registered in the filter
     #[inline]
-    pub fn should_process(&self, stream_name: &SharedStr) -> bool {
-        self.streams.is_empty() || self.streams.get(stream_name).copied().unwrap_or(false)
+    pub fn should_process(&self, stream: impl AsRef<str>) -> bool {
+        self.streams.is_empty() || self.streams.get(stream.as_ref()).copied().unwrap_or(false)
     }
 
     /// Returns true if this filter has no registered streams (accepts all)
