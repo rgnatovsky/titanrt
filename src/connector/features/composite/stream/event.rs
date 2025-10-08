@@ -74,7 +74,7 @@ pub struct StreamEventContext<E> {
     stream: SharedStr,
     routes: Vec<StreamEventRoute<E>>,
     tokens: StringTokens,
-    metadata: AHashMap<String, String>,
+    metadata: AHashMap<String, Value>,
 }
 
 impl<E> StreamEventContext<E> {
@@ -111,14 +111,14 @@ impl<E> StreamEventContext<E> {
 
     /// Snapshot of global metadata.
     #[inline]
-    pub fn metadata(&self) -> &AHashMap<String, String> {
+    pub fn metadata(&self) -> &AHashMap<String, Value> {
         &self.metadata
     }
 
     /// Mutate global metadata in-place.
     pub fn update_metadata<F>(&mut self, update: F)
     where
-        F: FnOnce(&mut AHashMap<String, String>),
+        F: FnOnce(&mut AHashMap<String, Value>),
     {
         update(&mut self.metadata);
     }
