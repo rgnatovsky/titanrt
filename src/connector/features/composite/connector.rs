@@ -335,14 +335,18 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
         errors
     }
 
-     /// Returns mutable reference to the stream
-    pub fn stream(&mut self, name: impl AsRef<str>) -> Option<&StreamWrapper<E>> {
-        self.slots.get(name.as_ref()).and_then(|slot| slot.stream.as_ref())
+    /// Returns mutable reference to the stream
+    pub fn stream(&self, name: impl AsRef<str>) -> Option<&StreamWrapper<E>> {
+        self.slots
+            .get(name.as_ref())
+            .and_then(|slot| slot.stream.as_ref())
     }
 
     /// Returns mutable reference to the stream
     pub fn stream_mut(&mut self, name: impl AsRef<str>) -> Option<&mut StreamWrapper<E>> {
-        self.slots.get_mut(name.as_ref()).and_then(|slot| slot.stream_mut())
+        self.slots
+            .get_mut(name.as_ref())
+            .and_then(|slot| slot.stream_mut())
     }
 
     /// Returns status of the stream
