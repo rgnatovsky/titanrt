@@ -198,11 +198,20 @@ impl StringTokens {
         self.segments.iter().any(|s| s == needle)
     }
 
+    /// Check if the list contains any of the tokens
+    pub fn contains_any(&self, needles: &[&str]) -> bool {
+        self.segments.iter().any(|s| needles.contains(&s.as_str()))
+    }
+
+
     /// Get the index of a token in the list
     /// Returns `None` if the token is not found
     pub fn index_of(&self, needle: &str) -> Option<usize> {
         self.segments.iter().position(|s| s == needle)
     }
 
-   
+    /// Get the index of a token in the list
+    pub fn index_of_any(&self, needles: &[&str]) -> Option<usize> {
+        self.segments.iter().position(|s| needles.contains(&s.as_str()))
+    }
 }
