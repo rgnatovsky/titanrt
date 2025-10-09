@@ -44,7 +44,7 @@ fn default_hook_calls_at_once() -> usize {
     128
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum StreamKind {
     Http,
@@ -64,7 +64,7 @@ impl AsRef<str> for StreamKind {
 
 impl StreamSpec {
     pub fn get_context<E: StreamEventParsed>(&self) -> StreamEventContext<E> {
-        let mut ctx = StreamEventContext::new(self.name.as_str());
+        let mut ctx = StreamEventContext::new(self.name.as_str(), self.kind);
         ctx.set_metadata(self.metadata.clone());
         ctx
     }

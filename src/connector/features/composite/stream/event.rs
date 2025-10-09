@@ -1,3 +1,4 @@
+use crate::connector::features::composite::stream::StreamKind;
 use crate::utils::MatchTarget;
 use crate::utils::RouteMatcher;
 use crate::utils::StringTokens;
@@ -72,19 +73,21 @@ impl<E> EventRouteRegistry<E> {
 #[derive(Debug, Clone)]
 pub struct StreamEventContext<E> {
     stream: SharedStr,
+    kind: StreamKind,
     routes: Vec<StreamEventRoute<E>>,
     tokens: StringTokens,
     metadata: HashMap<String, Value>,
 }
 
 impl<E> StreamEventContext<E> {
-    pub fn new(stream: &str) -> Self {
+    pub fn new(stream: &str, kind: StreamKind) -> Self {
         let tokens = StringTokens::parse(stream);
 
         let metadata = HashMap::new();
 
         let ctx = StreamEventContext {
             stream: stream.into(),
+            kind,
             routes: vec![],
             tokens,
             metadata,
@@ -107,6 +110,12 @@ impl<E> StreamEventContext<E> {
     #[inline]
     pub fn tokens_mut(&mut self) -> &mut StringTokens {
         &mut self.tokens
+    }
+
+    /// Kind of the stream.
+    #[inline]
+    pub fn kind(&self) -> StreamKind {
+        self.kind
     }
 
     /// Snapshot of global metadata.
