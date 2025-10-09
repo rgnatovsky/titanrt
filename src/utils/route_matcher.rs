@@ -1,6 +1,7 @@
 use crate::utils::StringTokens;
 use serde_json::Value;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MatchTarget {
     None,
     Label(String),
