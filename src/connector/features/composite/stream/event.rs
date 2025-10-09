@@ -139,8 +139,17 @@ impl<E> StreamEventContext<E> {
     }
 
     /// Iterator over all configured routes.
-    pub fn routes(&self) -> impl Iterator<Item = &StreamEventRoute<E>> + '_ {
+    pub fn routes_iter(&self) -> impl Iterator<Item = &StreamEventRoute<E>> + '_ {
         self.routes.iter()
+    }
+
+    /// Ref over all configured routes.
+    pub fn routes(&self) -> &Vec<StreamEventRoute<E>> {
+        &self.routes
+    }
+    /// Mutable ref over all configured routes.
+    pub fn routes_mut(&mut self) -> &mut Vec<StreamEventRoute<E>> {
+        &mut self.routes
     }
 
     /// Look up a route by identifier.
