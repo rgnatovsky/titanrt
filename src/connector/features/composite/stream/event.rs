@@ -1,3 +1,4 @@
+use crate::utils::MatchTarget;
 use crate::utils::RouteMatcher;
 use crate::utils::StringTokens;
 use crate::utils::{Reducer, SharedStr, StateMarker};
@@ -194,6 +195,10 @@ impl<E> StreamEventRoute<E> {
     #[inline(always)]
     pub fn parser(&self) -> &Arc<dyn StreamEventParser<E>> {
         &self.parser
+    }
+
+    pub fn match_target(&self) -> MatchTarget {
+        self.matcher.extract_targets()
     }
 }
 

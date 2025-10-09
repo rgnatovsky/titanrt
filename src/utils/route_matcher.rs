@@ -1,6 +1,20 @@
 use crate::utils::StringTokens;
 use serde_json::Value;
 
+pub enum MatchTarget {
+    None,
+    Label(String),
+    Payload {
+        path: StringTokens,
+        value: Value,
+    },
+    Both {
+        label: String,
+        path: StringTokens,
+        value: Value,
+    },
+}
+
 /// Matchers used to filter routes based on labels and nested payload fields.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RouteMatcher {
@@ -131,8 +145,8 @@ impl RouteMatcher {
     /// Returns extraction hints: (label_fragment, payload_path).
     /// `label_fragment` is the significant lowercased label piece used by this matcher (if any).
     /// `payload_path` is the JSON path targeted by this matcher (if any).
-    pub fn extract_targets(&self) -> (Option<String>, Option<(&StringTokens, Value)>) {
-        match self {
+    pub fn extract_targets(&self) -> MatchTarget {
+        let (label_fragment, payload_path) = match self {
             RouteMatcher::Always => (None, None),
 
             // label-driven
@@ -143,6 +157,20 @@ impl RouteMatcher {
 
             // payload-driven
             _ => (None, self.insertion_hint()),
+        };
+
+        match (payload_path, label_fragment) {
+            (None, None) => MatchTarget::None,
+            (None, Some(fragment)) => MatchTarget::Label(fragment),
+            (Some(path), None) => MatchTarget::Payload {
+                path: path.0.clone(),
+                value: path.1,
+            },
+            (Some(path), Some(fragment)) => MatchTarget::Both {
+                label: fragment,
+                path: path.0.clone(),
+                value: path.1,
+            },
         }
     }
 
