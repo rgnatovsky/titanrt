@@ -10,13 +10,16 @@ use super::inner::ConnectorInner;
 #[cfg(feature = "ws_conn")]
 use crate::connector::features::composite::ConnectorGuard;
 use crate::connector::features::composite::stream::event::{StreamEvent, StreamEventParsed};
-use crate::connector::features::composite::stream::{StreamSlot, StreamStatus, StreamWrapper};
+use crate::connector::features::composite::stream::{
+    CompositeAction, StreamSlot, StreamStatus, StreamWrapper,
+};
 use crate::connector::features::grpc::stream::GrpcCommand;
 use crate::connector::features::http::stream::actions::HttpAction;
 use crate::connector::features::shared::actions::StreamActionRaw;
 use crate::connector::features::websocket::stream::WebSocketCommand;
 use crate::io::mpmc::MpmcSender;
 use crate::io::ringbuffer::RingSender;
+use crate::utils::pipeline::{ActionPipelineRegistry, EncodableAction};
 use crate::utils::time::Timeframe;
 use crate::utils::{CancelToken, SharedStr, StateCell};
 
@@ -53,10 +56,11 @@ pub struct CompositeConnectorConfig {
     pub ensure_interval: Option<Timeframe>,
 }
 
-pub struct CompositeConnector<E: StreamEventParsed> {
+pub struct CompositeConnector<E: StreamEventParsed, A: EncodableAction> {
     cancel_token: CancelToken,
     reserved_core_ids: Option<Vec<usize>>,
     slots: HashMap<SharedStr, StreamSlot<E>>,
+    pub(crate) action_pipelines: ActionPipelineRegistry<A, CompositeAction>,
     pub(crate) event_tx: MpmcSender<StreamEvent<E>>,
     ensure_interval: Option<Duration>,
     max_streams: usize,
@@ -69,9 +73,10 @@ pub struct CompositeConnector<E: StreamEventParsed> {
     grpc: ConnectorInner<GrpcConnector>,
 }
 
-impl<E: StreamEventParsed> CompositeConnector<E> {
+impl<E: StreamEventParsed, A: EncodableAction> CompositeConnector<E, A> {
     pub fn new(
         config: CompositeConnectorConfig,
+        action_pipelines: ActionPipelineRegistry<A, CompositeAction>,
         cancel_token: CancelToken,
         reserved_core_ids: Option<Vec<usize>>,
         event_tx: MpmcSender<StreamEvent<E>>,
@@ -83,6 +88,7 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
             http: ConnectorInner::new(config.http, config.cancel_streams_policy),
             #[cfg(feature = "grpc_conn")]
             grpc: ConnectorInner::new(config.grpc, config.cancel_streams_policy),
+            action_pipelines,
             cancel_token,
             reserved_core_ids,
             event_tx,
@@ -381,5 +387,13 @@ impl<E: StreamEventParsed> CompositeConnector<E> {
             .get(stream.as_ref())
             .and_then(|slot| slot.stream.as_ref())
             .and_then(|stream| stream.ws_state())
+    }
+
+    pub fn action_pipelines(&self) -> &ActionPipelineRegistry<A, CompositeAction> {
+        &self.action_pipelines
+    }
+
+    pub fn action_pipelines_mut(&mut self) -> &mut ActionPipelineRegistry<A, CompositeAction> {
+        &mut self.action_pipelines
     }
 }

@@ -1,18 +1,21 @@
 use anyhow::{Context, anyhow};
 
-use crate::connector::{
-    BaseConnector, EventTxType,
-    features::composite::{
-        CompositeConnector,
-        stream::{
-            StreamKind, StreamSpec, StreamWrapper,
-            event::{StreamEventContext, StreamEventParsed},
-            hooks::{grpc_hook, http_hook, ws_hook},
+use crate::{
+    connector::{
+        BaseConnector, EventTxType,
+        features::composite::{
+            CompositeConnector,
+            stream::{
+                StreamKind, StreamSpec, StreamWrapper,
+                event::{StreamEventContext, StreamEventParsed},
+                hooks::{grpc_hook, http_hook, ws_hook},
+            },
         },
     },
+    utils::pipeline::EncodableAction,
 };
 
-impl<E: StreamEventParsed> CompositeConnector<E> {
+impl<E: StreamEventParsed, A: EncodableAction> CompositeConnector<E, A> {
     pub fn spawn_stream(
         &self,
         spec: &StreamSpec,

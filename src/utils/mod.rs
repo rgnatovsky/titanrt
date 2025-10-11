@@ -19,3 +19,4 @@ mod shared_str;
 mod state;
 mod str_tokens;
 pub mod time;
+pub mod pipeline;
