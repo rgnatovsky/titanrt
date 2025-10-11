@@ -10,7 +10,7 @@ pub trait EncodableAction: Debug + Clone + 'static {
     ///
     /// This provides type-safe context instead of using `HashMap<String, Value>`.
     /// Commands can define their own context types with specific fields.
-    type Ctx: Default + Debug + Clone + 'static;
+    type Ctx: Send + Default + Debug + Clone + 'static;
 
     /// Get the encoder id for this command: e.g., "bybit"
     fn encoder_key(&self) -> impl AsRef<str>;
