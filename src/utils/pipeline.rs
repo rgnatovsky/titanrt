@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::Arc;
 
 // use crate::connector::features::composite::stream::{CompositeAction, event::StreamEventRoute};
 
@@ -39,12 +40,12 @@ pub trait ActionPass<A: EncodableAction>: Debug + Send {
 }
 
 /// High-performance action pipeline with venue-based routing
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ActionPipeline<Cmd: EncodableAction, Encoded> {
     /// Pipeline passes (for preprocessing commands, validating, etc.)
-    passes: Vec<Box<dyn ActionPass<Cmd>>>,
+    passes: Vec<Arc<dyn ActionPass<Cmd>>>,
     /// Venue-specific encoders (keyed by venue ID)
-    encoders: HashMap<String, Box<dyn ActionEncoder<Cmd, Encoded>>>,
+    encoders: HashMap<String, Arc<dyn ActionEncoder<Cmd, Encoded>>>,
     /// Default context for preprocessing and encoding (type-safe!)
     default_ctx: Cmd::Ctx,
 }
@@ -73,7 +74,7 @@ impl<A: EncodableAction, Encoded> ActionPipeline<A, Encoded> {
     }
 
     /// Register a venue-specific processor
-    pub fn register_pass(&mut self, processor: Box<dyn ActionPass<A>>) {
+    pub fn register_pass(&mut self, processor: Arc<dyn ActionPass<A>>) {
         self.passes.push(processor);
     }
 
@@ -85,7 +86,7 @@ impl<A: EncodableAction, Encoded> ActionPipeline<A, Encoded> {
     /// Register a venue-specific encoder
     ///
     /// This allows different encoding settings per venue (e.g., different timeouts)
-    pub fn register_encoder(&mut self, encoder: Box<dyn ActionEncoder<A, Encoded>>) {
+    pub fn register_encoder(&mut self, encoder: Arc<dyn ActionEncoder<A, Encoded>>) {
         self.encoders.insert(encoder.key().to_string(), encoder);
     }
 
@@ -136,7 +137,7 @@ impl<A: EncodableAction, Encoded> ActionPipeline<A, Encoded> {
     }
 
     /// Remove a pass at specific index, returns the removed pass if exists
-    pub fn remove_pass(&mut self, index: usize) -> Option<Box<dyn ActionPass<A>>> {
+    pub fn remove_pass(&mut self, index: usize) -> Option<Arc<dyn ActionPass<A>>> {
         if index < self.passes.len() {
             Some(self.passes.remove(index))
         } else {
@@ -157,7 +158,7 @@ impl<A: EncodableAction, Encoded> ActionPipeline<A, Encoded> {
     pub fn remove_encoder(
         &mut self,
         venue: impl AsRef<str>,
-    ) -> Option<Box<dyn ActionEncoder<A, Encoded>>> {
+    ) -> Option<Arc<dyn ActionEncoder<A, Encoded>>> {
         self.encoders.remove(venue.as_ref())
     }
 
@@ -177,7 +178,7 @@ impl<A: EncodableAction, Encoded> ActionPipeline<A, Encoded> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ActionPipelineRegistry<A: EncodableAction, Encoded> {
     default: ActionPipeline<A, Encoded>,
     by_key: HashMap<String, ActionPipeline<A, Encoded>>,
