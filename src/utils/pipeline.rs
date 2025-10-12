@@ -18,7 +18,7 @@ pub trait EncodableAction: Debug + Clone + 'static {
 }
 
 /// Action encoder trait - converts commands to venue-specific actions
-pub trait ActionEncoder<A: EncodableAction, Encoded>: Debug + Send {
+pub trait ActionEncoder<A: EncodableAction, Encoded>: Sync + Debug + Send {
     /// Process a command into one or more venue-specific actions
     ///
     /// # Arguments
@@ -35,7 +35,7 @@ pub trait ActionEncoder<A: EncodableAction, Encoded>: Debug + Send {
 }
 
 /// Action pass trait - processes a command and returns a new command
-pub trait ActionPass<A: EncodableAction>: Debug + Send {
+pub trait ActionPass<A: EncodableAction>: Sync + Debug + Send {
     fn run(&self, cmd: A, ctx: &A::Ctx) -> anyhow::Result<A>;
 }
 
