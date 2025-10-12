@@ -57,7 +57,7 @@ impl<'a, A: EncodableAction> PipelineCommand<'a, A> {
         self
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CompositeAction {
     Http(StreamActionRaw<HttpAction>),
     Grpc(StreamActionRaw<GrpcCommand>),
