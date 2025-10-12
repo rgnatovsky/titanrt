@@ -7,13 +7,13 @@ use crate::{
         websocket::stream::WebSocketCommand,
     },
     prelude::BaseTx,
-    utils::pipeline::EncodableAction,
+    utils::pipeline::{EncodableAction, PipelineHandle},
 };
 
 pub struct PipelineCommand<'a, A: EncodableAction> {
     pub payload: A,
     pub stream: &'a str,
-    pub routing_key: Option<&'a str>,
+    pub handle: Option<PipelineHandle>,
     pub ctx: Option<&'a A::Ctx>,
 }
 
@@ -22,7 +22,7 @@ impl<'a, A: EncodableAction> PipelineCommand<'a, A> {
         Self {
             payload,
             stream,
-            routing_key: None,
+            handle: None,
             ctx: None,
         }
     }
@@ -32,13 +32,13 @@ impl<'a, A: EncodableAction> PipelineCommand<'a, A> {
         self
     }
 
-    pub fn with_routing_key(mut self, key: &'a str) -> Self {
-        self.routing_key = Some(key);
+    pub fn with_handle(mut self, handle: PipelineHandle) -> Self {
+        self.handle = Some(handle);
         self
     }
 
     pub fn without_routing_key(mut self) -> Self {
-        self.routing_key = None;
+        self.handle = None;
         self
     }
 
@@ -137,12 +137,15 @@ impl<E: StreamEventParsed, A: EncodableAction> CompositeConnector<E, A> {
         let PipelineCommand {
             payload,
             stream,
-            routing_key,
+            handle,
             ctx,
         } = cmd;
 
-        let pipeline = match routing_key {
-            Some(key) => self.action_pipelines.get(key),
+        let pipeline = match handle {
+            Some(key) => match self.action_pipelines.get(key) {
+                Some(p) => p,
+                None => return Err(anyhow::anyhow!("{} unknown pipeline", key)),
+            },
             None => self.action_pipelines.get_default(),
         };
 

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::fmt::Display;
 use std::sync::Arc;
 
 // use crate::connector::features::composite::stream::{CompositeAction, event::StreamEventRoute};
@@ -132,10 +133,22 @@ impl<A: EncodableAction, Encoded> ActionPipeline<A, Encoded> {
     }
 }
 
+/// Handle to access a pipeline in the registry
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PipelineHandle(usize);
+
+impl Display for PipelineHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ActionPipelineRegistry<A: EncodableAction, Encoded> {
     default: ActionPipeline<A, Encoded>,
-    by_key: HashMap<String, ActionPipeline<A, Encoded>>,
+    slots: Vec<Option<ActionPipeline<A, Encoded>>>,
+    by_key: HashMap<String, PipelineHandle>,
+    next_id: usize,
 }
 
 impl<Cmd: EncodableAction, Encoded> ActionPipelineRegistry<Cmd, Encoded>
@@ -145,7 +158,9 @@ where
     pub fn new(default: Option<ActionPipeline<Cmd, Encoded>>) -> Self {
         Self {
             default: default.unwrap_or_else(ActionPipeline::with_default_encoder),
+            slots: Vec::new(),
             by_key: HashMap::new(),
+            next_id: 0,
         }
     }
 
@@ -160,31 +175,109 @@ impl<A: EncodableAction, Encoded> ActionPipelineRegistry<A, Encoded> {
         self.default = pipeline;
     }
 
-    pub fn register_pipeline(&mut self, key: String, pipeline: ActionPipeline<A, Encoded>) {
-        self.by_key.insert(key, pipeline);
+    /// Register a new pipeline and return a handle to access it
+    pub fn register_pipeline(&mut self, pipeline: ActionPipeline<A, Encoded>) -> PipelineHandle {
+        // Try to find an empty slot first
+        for (idx, slot) in self.slots.iter_mut().enumerate() {
+            if slot.is_none() {
+                *slot = Some(pipeline);
+                return PipelineHandle(idx);
+            }
+        }
+
+        // No empty slot found, push to the end
+        self.slots.push(Some(pipeline));
+        PipelineHandle(self.slots.len() - 1)
+    }
+
+    /// Register a new pipeline with a string key and return a handle to access it
+    pub fn register_pipeline_with_key(
+        &mut self,
+        key: String,
+        pipeline: ActionPipeline<A, Encoded>,
+    ) -> PipelineHandle {
+        let handle = self.register_pipeline(pipeline);
+        self.by_key.insert(key, handle);
+        handle
     }
 
     pub fn get_default(&self) -> &ActionPipeline<A, Encoded> {
         &self.default
     }
 
-    pub fn get(&self, key: &str) -> &ActionPipeline<A, Encoded> {
-        self.by_key.get(key).unwrap_or(&self.default)
-    }
-    pub fn get_mut(&mut self, key: &str) -> &mut ActionPipeline<A, Encoded> {
-        self.by_key.get_mut(key).unwrap_or(&mut self.default)
+    /// Get pipeline by handle
+    pub fn get(&self, handle: PipelineHandle) -> Option<&ActionPipeline<A, Encoded>> {
+        self.slots.get(handle.0).and_then(|slot| slot.as_ref())
     }
 
-    pub fn remove(&mut self, key: &str) -> Option<ActionPipeline<A, Encoded>> {
-        self.by_key.remove(key)
+    /// Get pipeline by string key, falls back to default if not found
+    pub fn get_by_key(&self, key: &str) -> &ActionPipeline<A, Encoded> {
+        self.by_key
+            .get(key)
+            .and_then(|handle| self.get(*handle))
+            .unwrap_or(&self.default)
+    }
+
+    /// Get mutable pipeline by handle
+    pub fn get_mut(&mut self, handle: PipelineHandle) -> Option<&mut ActionPipeline<A, Encoded>> {
+        self.slots.get_mut(handle.0).and_then(|slot| slot.as_mut())
+    }
+
+    /// Get mutable pipeline by string key, falls back to default if not found
+    pub fn get_mut_by_key(&mut self, key: &str) -> &mut ActionPipeline<A, Encoded> {
+        let handle = self.by_key.get(key).copied();
+
+        match handle {
+            Some(h) => self
+                .slots
+                .get_mut(h.0)
+                .and_then(|slot| slot.as_mut())
+                .unwrap_or(&mut self.default),
+            None => &mut self.default,
+        }
+    }
+
+    /// Remove pipeline by handle
+    pub fn remove(&mut self, handle: PipelineHandle) -> Option<ActionPipeline<A, Encoded>> {
+        // Remove from by_key map
+        self.by_key.retain(|_, h| *h != handle);
+        // Remove from slots
+        self.slots.get_mut(handle.0).and_then(|slot| slot.take())
+    }
+
+    /// Remove pipeline by string key
+    pub fn remove_by_key(&mut self, key: &str) -> Option<ActionPipeline<A, Encoded>> {
+        if let Some(handle) = self.by_key.remove(key) {
+            self.remove(handle)
+        } else {
+            None
+        }
     }
 
     pub fn clear(&mut self) {
+        self.slots.clear();
         self.by_key.clear();
+        self.next_id = 0;
+    }
+
+    pub fn contains(&self, handle: PipelineHandle) -> bool {
+        self.slots
+            .get(handle.0)
+            .map_or(false, |slot| slot.is_some())
     }
 
     pub fn contains_key(&self, key: &str) -> bool {
         self.by_key.contains_key(key)
+    }
+
+    /// Get total number of registered pipelines
+    pub fn len(&self) -> usize {
+        self.slots.iter().filter(|slot| slot.is_some()).count()
+    }
+
+    /// Check if registry has no registered pipelines
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
