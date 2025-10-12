@@ -13,29 +13,29 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub enum PipelineRoute<'a> {
+pub enum PipeRoute<'a> {
     Default,
     Handle(PipelineHandle),
     Key(&'a str),
 }
 
-impl<'a> Display for PipelineRoute<'a> {
+impl<'a> Display for PipeRoute<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PipelineRoute::Default => write!(f, "default"),
-            PipelineRoute::Handle(h) => write!(f, "{}", h),
-            PipelineRoute::Key(k) => write!(f, "{}", k),
+            PipeRoute::Default => write!(f, "default"),
+            PipeRoute::Handle(h) => write!(f, "{}", h),
+            PipeRoute::Key(k) => write!(f, "{}", k),
         }
     }
 }
 
-pub struct PipelineCommand<'a, A: EncodableAction> {
+pub struct PipeCmd<'a, A: EncodableAction> {
     pub payload: A,
     pub stream: &'a str,
     pub ctx: Option<&'a A::Ctx>,
 }
 
-impl<'a, A: EncodableAction> PipelineCommand<'a, A> {
+impl<'a, A: EncodableAction> PipeCmd<'a, A> {
     pub fn new(payload: A, stream: &'a str, ctx: Option<&'a A::Ctx>) -> Self {
         Self {
             payload,
@@ -123,10 +123,10 @@ impl<E: StreamEventParsed, A: EncodableAction> CompositeConnector<E, A> {
 
     pub fn send_via_pipeline(
         &mut self,
-        route: PipelineRoute<'_>,
-        cmd: PipelineCommand<A>,
+        route: PipeRoute<'_>,
+        cmd: PipeCmd<A>,
     ) -> anyhow::Result<()> {
-        let PipelineCommand {
+        let PipeCmd {
             payload,
             stream,
 
@@ -134,9 +134,9 @@ impl<E: StreamEventParsed, A: EncodableAction> CompositeConnector<E, A> {
         } = cmd;
 
         let pipeline = match route {
-            PipelineRoute::Default => Some(self.action_pipelines.get_default()),
-            PipelineRoute::Handle(h) => self.action_pipelines.get(h),
-            PipelineRoute::Key(k) => self.action_pipelines.get_by_key(k),
+            PipeRoute::Default => Some(self.action_pipelines.get_default()),
+            PipeRoute::Handle(h) => self.action_pipelines.get(h),
+            PipeRoute::Key(k) => self.action_pipelines.get_by_key(k),
         };
 
         let pipeline = match pipeline {
