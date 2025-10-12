@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::{
     connector::features::{
         composite::{CompositeConnector, stream::event::StreamEventParsed},
@@ -10,53 +12,39 @@ use crate::{
     utils::pipeline::{EncodableAction, PipelineHandle},
 };
 
+#[derive(Debug, Clone)]
+pub enum PipelineRoute<'a> {
+    Default,
+    Handle(PipelineHandle),
+    Key(&'a str),
+}
+
+impl<'a> Display for PipelineRoute<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PipelineRoute::Default => write!(f, "default"),
+            PipelineRoute::Handle(h) => write!(f, "{}", h),
+            PipelineRoute::Key(k) => write!(f, "{}", k),
+        }
+    }
+}
+
 pub struct PipelineCommand<'a, A: EncodableAction> {
     pub payload: A,
     pub stream: &'a str,
-    pub handle: Option<PipelineHandle>,
     pub ctx: Option<&'a A::Ctx>,
 }
 
 impl<'a, A: EncodableAction> PipelineCommand<'a, A> {
-    pub fn new(payload: A, stream: &'a str) -> Self {
+    pub fn new(payload: A, stream: &'a str, ctx: Option<&'a A::Ctx>) -> Self {
         Self {
             payload,
             stream,
-            handle: None,
-            ctx: None,
+            ctx,
         }
     }
-
-    pub fn with_stream(mut self, stream: &'a str) -> Self {
-        self.stream = stream;
-        self
-    }
-
-    pub fn with_handle(mut self, handle: PipelineHandle) -> Self {
-        self.handle = Some(handle);
-        self
-    }
-
-    pub fn without_routing_key(mut self) -> Self {
-        self.handle = None;
-        self
-    }
-
-    pub fn with_ctx(mut self, ctx: &'a A::Ctx) -> Self {
-        self.ctx = Some(ctx);
-        self
-    }
-
-    pub fn without_ctx(mut self) -> Self {
-        self.ctx = None;
-        self
-    }
-
-    pub fn with_payload(mut self, send_case: A) -> Self {
-        self.payload = send_case;
-        self
-    }
 }
+
 #[derive(Debug, Clone)]
 pub enum CompositeAction {
     Http(StreamActionRaw<HttpAction>),
@@ -133,20 +121,27 @@ impl<E: StreamEventParsed, A: EncodableAction> CompositeConnector<E, A> {
         }
     }
 
-    pub fn send_via_pipeline(&mut self, cmd: PipelineCommand<A>) -> anyhow::Result<()> {
+    pub fn send_via_pipeline(
+        &mut self,
+        route: PipelineRoute<'_>,
+        cmd: PipelineCommand<A>,
+    ) -> anyhow::Result<()> {
         let PipelineCommand {
             payload,
             stream,
-            handle,
+
             ctx,
         } = cmd;
 
-        let pipeline = match handle {
-            Some(key) => match self.action_pipelines.get(key) {
-                Some(p) => p,
-                None => return Err(anyhow::anyhow!("{} unknown pipeline", key)),
-            },
-            None => self.action_pipelines.get_default(),
+        let pipeline = match route {
+            PipelineRoute::Default => Some(self.action_pipelines.get_default()),
+            PipelineRoute::Handle(h) => self.action_pipelines.get(h),
+            PipelineRoute::Key(k) => self.action_pipelines.get_by_key(k),
+        };
+
+        let pipeline = match pipeline {
+            Some(p) => p,
+            None => return Err(anyhow::anyhow!("unknown pipeline route {:?}", route)),
         };
 
         let actions = match ctx {

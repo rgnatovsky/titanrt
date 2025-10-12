@@ -211,11 +211,8 @@ impl<A: EncodableAction, Encoded> ActionPipelineRegistry<A, Encoded> {
     }
 
     /// Get pipeline by string key, falls back to default if not found
-    pub fn get_by_key(&self, key: &str) -> &ActionPipeline<A, Encoded> {
-        self.by_key
-            .get(key)
-            .and_then(|handle| self.get(*handle))
-            .unwrap_or(&self.default)
+    pub fn get_by_key(&self, key: &str) -> Option<&ActionPipeline<A, Encoded>> {
+        self.by_key.get(key).and_then(|handle| self.get(*handle))
     }
 
     /// Get mutable pipeline by handle
