@@ -9,33 +9,33 @@ use crate::{
         websocket::stream::WebSocketCommand,
     },
     prelude::BaseTx,
-    utils::pipeline::{EncodableAction, PipelineHandle},
+    utils::pipeline::{EncodableRequest, EncoderId},
 };
 
 #[derive(Debug, Clone)]
-pub enum PipeRoute<'a> {
+pub enum Selector<'a> {
     Default,
-    Handle(PipelineHandle),
+    Id(EncoderId),
     Key(&'a str),
 }
 
-impl<'a> Display for PipeRoute<'a> {
+impl<'a> Display for Selector<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PipeRoute::Default => write!(f, "default"),
-            PipeRoute::Handle(h) => write!(f, "{}", h),
-            PipeRoute::Key(k) => write!(f, "{}", k),
+            Selector::Default => write!(f, "default"),
+            Selector::Id(h) => write!(f, "{}", h),
+            Selector::Key(k) => write!(f, "{}", k),
         }
     }
 }
 
-pub struct PipeCmd<'a, A: EncodableAction> {
+pub struct Request<'a, A: EncodableRequest> {
     pub payload: A,
     pub stream: &'a str,
     pub ctx: Option<&'a A::Ctx>,
 }
 
-impl<'a, A: EncodableAction> PipeCmd<'a, A> {
+impl<'a, A: EncodableRequest> Request<'a, A> {
     pub fn new(payload: A, stream: &'a str, ctx: Option<&'a A::Ctx>) -> Self {
         Self {
             payload,
@@ -52,7 +52,7 @@ pub enum CompositeAction {
     Ws(StreamActionRaw<WebSocketCommand>),
 }
 
-impl<E: StreamEventParsed, A: EncodableAction> CompositeConnector<E, A> {
+impl<E: StreamEventParsed, A: EncodableRequest> CompositeConnector<E, A> {
     pub fn send_http(
         &mut self,
         stream: impl AsRef<str>,
@@ -121,27 +121,23 @@ impl<E: StreamEventParsed, A: EncodableAction> CompositeConnector<E, A> {
         }
     }
 
-    pub fn send_via_pipeline(
-        &mut self,
-        route: PipeRoute<'_>,
-        cmd: PipeCmd<A>,
-    ) -> anyhow::Result<()> {
-        let PipeCmd {
+    pub fn send_encoded(&mut self, via: Selector<'_>, req: Request<A>) -> anyhow::Result<()> {
+        let Request {
             payload,
             stream,
 
             ctx,
-        } = cmd;
+        } = req;
 
-        let pipeline = match route {
-            PipeRoute::Default => Some(self.action_pipelines.get_default()),
-            PipeRoute::Handle(h) => self.action_pipelines.get(h),
-            PipeRoute::Key(k) => self.action_pipelines.get_by_key(k),
+        let pipeline = match via {
+            Selector::Default => Some(self.action_pipelines.get_default()),
+            Selector::Id(h) => self.action_pipelines.get(h),
+            Selector::Key(k) => self.action_pipelines.get_by_key(k),
         };
 
         let pipeline = match pipeline {
             Some(p) => p,
-            None => return Err(anyhow::anyhow!("unknown pipeline route {:?}", route)),
+            None => return Err(anyhow::anyhow!("unknown pipeline route {:?}", via)),
         };
 
         let actions = match ctx {

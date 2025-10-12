@@ -5,9 +5,9 @@ use std::sync::Arc;
 
 // use crate::connector::features::composite::stream::{CompositeAction, event::StreamEventRoute};
 
-/// Base action trait - all commands must implement this
-/// to be processed by the action pipeline
-pub trait EncodableAction: Debug + Clone + 'static {
+/// Base request trait - all commands/actions must implement this
+/// to be processed by the encoder pipeline
+pub trait EncodableRequest: Debug + Clone + 'static {
     /// Associated type for command context
     ///
     /// This provides type-safe context instead of using `HashMap<String, Value>`.
@@ -15,15 +15,15 @@ pub trait EncodableAction: Debug + Clone + 'static {
     type Ctx: Send + Default + Debug + Clone + 'static;
 }
 
-/// Action encoder trait - converts commands to venue-specific actions
-pub trait ActionEncoder<A: EncodableAction, Encoded>: Sync + Debug + Send {
+/// Request encoder trait - converts commands to venue-specific actions
+pub trait Encoder<Req: EncodableRequest, Encoded>: Sync + Debug + Send {
     /// Process a command into one or more venue-specific actions
     ///
     /// # Arguments
     ///
-    /// * `cmd` - The command to encode
+    /// * `req` - The command to encode
     /// * `ctx` - Type-safe context specific to this command type
-    fn encode(&self, cmd: A, ctx: &A::Ctx) -> anyhow::Result<Vec<Encoded>>;
+    fn encode(&self, req: Req, ctx: &Req::Ctx) -> anyhow::Result<Vec<Encoded>>;
 
     /// Get the venue ID this processor handles
     /// Default implementation returns the type name
@@ -32,27 +32,27 @@ pub trait ActionEncoder<A: EncodableAction, Encoded>: Sync + Debug + Send {
     }
 
     /// Optional: validate if command is supported
-    fn supports(&self, cmd: &A) -> bool;
+    fn supports(&self, req: &Req) -> bool;
 }
 
 /// Action pass trait - processes a command and returns a new command
-pub trait ActionPass<A: EncodableAction>: Sync + Debug + Send {
-    fn run(&self, cmd: A, ctx: &A::Ctx) -> anyhow::Result<A>;
+pub trait ActionPass<Req: EncodableRequest>: Sync + Debug + Send {
+    fn run(&self, req: Req, ctx: &Req::Ctx) -> anyhow::Result<Req>;
 }
 
 /// High-performance action pipeline with venue-based routing
 #[derive(Debug, Clone)]
-pub struct ActionPipeline<Cmd: EncodableAction, Encoded> {
+pub struct EncoderPipeline<Req: EncodableRequest, Encoded> {
     /// Pipeline passes (for preprocessing commands, validating, etc.)
-    passes: Vec<Arc<dyn ActionPass<Cmd>>>,
+    passes: Vec<Arc<dyn ActionPass<Req>>>,
     /// Venue-specific encoders (keyed by venue ID)
-    encoder: Arc<dyn ActionEncoder<Cmd, Encoded>>,
+    encoder: Arc<dyn Encoder<Req, Encoded>>,
     /// Default context for preprocessing and encoding (type-safe!)
-    default_ctx: Cmd::Ctx,
+    default_ctx: Req::Ctx,
 }
 
-impl<A: EncodableAction, Encoded> ActionPipeline<A, Encoded> {
-    pub fn new(encoder: Arc<dyn ActionEncoder<A, Encoded>>, ctx: Option<A::Ctx>) -> Self {
+impl<Req: EncodableRequest, Encoded> EncoderPipeline<Req, Encoded> {
+    pub fn new(encoder: Arc<dyn Encoder<Req, Encoded>>, ctx: Option<Req::Ctx>) -> Self {
         Self {
             passes: Vec::new(),
             encoder,
@@ -63,45 +63,49 @@ impl<A: EncodableAction, Encoded> ActionPipeline<A, Encoded> {
     /// Create a new pipeline with a default no-op encoder
     pub fn with_default_encoder() -> Self
     where
-        A::Ctx: Default,
+        Req::Ctx: Default,
     {
         Self {
             passes: Vec::new(),
             encoder: Arc::new(NoOpEncoder),
-            default_ctx: A::Ctx::default(),
+            default_ctx: Req::Ctx::default(),
         }
     }
 
-    pub fn set_encoder(&mut self, encoder: Arc<dyn ActionEncoder<A, Encoded>>) {
+    pub fn set_encoder(&mut self, encoder: Arc<dyn Encoder<Req, Encoded>>) {
         self.encoder = encoder;
     }
 
     /// Register a venue-specific processor
-    pub fn register_pass(&mut self, processor: Arc<dyn ActionPass<A>>) {
+    pub fn register_pass(&mut self, processor: Arc<dyn ActionPass<Req>>) {
         self.passes.push(processor);
     }
 
     /// Set the default context
-    pub fn set_default_context(&mut self, ctx: A::Ctx) {
+    pub fn set_default_context(&mut self, ctx: Req::Ctx) {
         self.default_ctx = ctx;
     }
 
     /// Execute a command
-    pub fn execute(&self, cmd: A) -> anyhow::Result<Vec<Encoded>> {
-        self.execute_with_context(cmd, &self.default_ctx)
+    pub fn execute(&self, req: Req) -> anyhow::Result<Vec<Encoded>> {
+        self.execute_with_context(req, &self.default_ctx)
     }
 
     /// Execute a command with a specific context
-    pub fn execute_with_context(&self, mut cmd: A, ctx: &A::Ctx) -> anyhow::Result<Vec<Encoded>> {
+    pub fn execute_with_context(
+        &self,
+        mut req: Req,
+        ctx: &Req::Ctx,
+    ) -> anyhow::Result<Vec<Encoded>> {
         for p in &self.passes {
-            cmd = p.run(cmd, ctx)?;
+            req = p.run(req, ctx)?;
         }
 
-        self.encoder.encode(cmd, ctx)
+        self.encoder.encode(req, ctx)
     }
 
-    pub fn supports_cmd(&self, cmd: &A) -> bool {
-        self.encoder.supports(cmd)
+    pub fn supports_cmd(&self, req: &Req) -> bool {
+        self.encoder.supports(req)
     }
 
     /// Remove all passes from the pipeline
@@ -110,7 +114,7 @@ impl<A: EncodableAction, Encoded> ActionPipeline<A, Encoded> {
     }
 
     /// Remove a pass at specific index, returns the removed pass if exists
-    pub fn remove_pass(&mut self, index: usize) -> Option<Arc<dyn ActionPass<A>>> {
+    pub fn remove_pass(&mut self, index: usize) -> Option<Arc<dyn ActionPass<Req>>> {
         if index < self.passes.len() {
             Some(self.passes.remove(index))
         } else {
@@ -126,38 +130,38 @@ impl<A: EncodableAction, Encoded> ActionPipeline<A, Encoded> {
     /// Reset pipeline to default state
     pub fn reset(&mut self)
     where
-        A::Ctx: Default,
+        Req::Ctx: Default,
     {
         self.clear_passes();
-        self.default_ctx = A::Ctx::default();
+        self.default_ctx = Req::Ctx::default();
     }
 }
 
-/// Handle to access a pipeline in the registry
+/// id to access a pipeline in the registry
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct PipelineHandle(usize);
+pub struct EncoderId(usize);
 
-impl Display for PipelineHandle {
+impl Display for EncoderId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct ActionPipelineRegistry<A: EncodableAction, Encoded> {
-    default: ActionPipeline<A, Encoded>,
-    slots: Vec<Option<ActionPipeline<A, Encoded>>>,
-    by_key: HashMap<String, PipelineHandle>,
+pub struct EncoderRegistry<Req: EncodableRequest, Encoded> {
+    default: EncoderPipeline<Req, Encoded>,
+    slots: Vec<Option<EncoderPipeline<Req, Encoded>>>,
+    by_key: HashMap<String, EncoderId>,
     next_id: usize,
 }
 
-impl<Cmd: EncodableAction, Encoded> ActionPipelineRegistry<Cmd, Encoded>
+impl<Req: EncodableRequest, Encoded> EncoderRegistry<Req, Encoded>
 where
-    Cmd::Ctx: Default,
+    Req::Ctx: Default,
 {
-    pub fn new(default: Option<ActionPipeline<Cmd, Encoded>>) -> Self {
+    pub fn new(default: Option<EncoderPipeline<Req, Encoded>>) -> Self {
         Self {
-            default: default.unwrap_or_else(ActionPipeline::with_default_encoder),
+            default: default.unwrap_or_else(EncoderPipeline::with_default_encoder),
             slots: Vec::new(),
             by_key: HashMap::new(),
             next_id: 0,
@@ -166,65 +170,65 @@ where
 
     pub fn reset(&mut self) {
         self.clear();
-        self.override_default(ActionPipeline::with_default_encoder());
+        self.override_default(EncoderPipeline::with_default_encoder());
     }
 }
 
-impl<A: EncodableAction, Encoded> ActionPipelineRegistry<A, Encoded> {
-    pub fn override_default(&mut self, pipeline: ActionPipeline<A, Encoded>) {
+impl<A: EncodableRequest, Encoded> EncoderRegistry<A, Encoded> {
+    pub fn override_default(&mut self, pipeline: EncoderPipeline<A, Encoded>) {
         self.default = pipeline;
     }
 
-    /// Register a new pipeline and return a handle to access it
-    pub fn register_pipeline(&mut self, pipeline: ActionPipeline<A, Encoded>) -> PipelineHandle {
+    /// Register a new pipeline and return a id to access it
+    pub fn register_pipeline(&mut self, pipeline: EncoderPipeline<A, Encoded>) -> EncoderId {
         // Try to find an empty slot first
         for (idx, slot) in self.slots.iter_mut().enumerate() {
             if slot.is_none() {
                 *slot = Some(pipeline);
-                return PipelineHandle(idx);
+                return EncoderId(idx);
             }
         }
 
         // No empty slot found, push to the end
         self.slots.push(Some(pipeline));
-        PipelineHandle(self.slots.len() - 1)
+        EncoderId(self.slots.len() - 1)
     }
 
-    /// Register a new pipeline with a string key and return a handle to access it
+    /// Register a new pipeline with a string key and return a id to access it
     pub fn register_pipeline_with_key(
         &mut self,
         key: String,
-        pipeline: ActionPipeline<A, Encoded>,
-    ) -> PipelineHandle {
-        let handle = self.register_pipeline(pipeline);
-        self.by_key.insert(key, handle);
-        handle
+        pipeline: EncoderPipeline<A, Encoded>,
+    ) -> EncoderId {
+        let id = self.register_pipeline(pipeline);
+        self.by_key.insert(key, id);
+        id
     }
 
-    pub fn get_default(&self) -> &ActionPipeline<A, Encoded> {
+    pub fn get_default(&self) -> &EncoderPipeline<A, Encoded> {
         &self.default
     }
 
-    /// Get pipeline by handle
-    pub fn get(&self, handle: PipelineHandle) -> Option<&ActionPipeline<A, Encoded>> {
-        self.slots.get(handle.0).and_then(|slot| slot.as_ref())
+    /// Get pipeline by id
+    pub fn get(&self, id: EncoderId) -> Option<&EncoderPipeline<A, Encoded>> {
+        self.slots.get(id.0).and_then(|slot| slot.as_ref())
     }
 
     /// Get pipeline by string key, falls back to default if not found
-    pub fn get_by_key(&self, key: &str) -> Option<&ActionPipeline<A, Encoded>> {
-        self.by_key.get(key).and_then(|handle| self.get(*handle))
+    pub fn get_by_key(&self, key: &str) -> Option<&EncoderPipeline<A, Encoded>> {
+        self.by_key.get(key).and_then(|id| self.get(*id))
     }
 
-    /// Get mutable pipeline by handle
-    pub fn get_mut(&mut self, handle: PipelineHandle) -> Option<&mut ActionPipeline<A, Encoded>> {
-        self.slots.get_mut(handle.0).and_then(|slot| slot.as_mut())
+    /// Get mutable pipeline by id
+    pub fn get_mut(&mut self, id: EncoderId) -> Option<&mut EncoderPipeline<A, Encoded>> {
+        self.slots.get_mut(id.0).and_then(|slot| slot.as_mut())
     }
 
     /// Get mutable pipeline by string key, falls back to default if not found
-    pub fn get_mut_by_key(&mut self, key: &str) -> &mut ActionPipeline<A, Encoded> {
-        let handle = self.by_key.get(key).copied();
+    pub fn get_mut_by_key(&mut self, key: &str) -> &mut EncoderPipeline<A, Encoded> {
+        let id = self.by_key.get(key).copied();
 
-        match handle {
+        match id {
             Some(h) => self
                 .slots
                 .get_mut(h.0)
@@ -234,18 +238,18 @@ impl<A: EncodableAction, Encoded> ActionPipelineRegistry<A, Encoded> {
         }
     }
 
-    /// Remove pipeline by handle
-    pub fn remove(&mut self, handle: PipelineHandle) -> Option<ActionPipeline<A, Encoded>> {
+    /// Remove pipeline by id
+    pub fn remove(&mut self, id: EncoderId) -> Option<EncoderPipeline<A, Encoded>> {
         // Remove from by_key map
-        self.by_key.retain(|_, h| *h != handle);
+        self.by_key.retain(|_, h| *h != id);
         // Remove from slots
-        self.slots.get_mut(handle.0).and_then(|slot| slot.take())
+        self.slots.get_mut(id.0).and_then(|slot| slot.take())
     }
 
     /// Remove pipeline by string key
-    pub fn remove_by_key(&mut self, key: &str) -> Option<ActionPipeline<A, Encoded>> {
-        if let Some(handle) = self.by_key.remove(key) {
-            self.remove(handle)
+    pub fn remove_by_key(&mut self, key: &str) -> Option<EncoderPipeline<A, Encoded>> {
+        if let Some(id) = self.by_key.remove(key) {
+            self.remove(id)
         } else {
             None
         }
@@ -257,10 +261,8 @@ impl<A: EncodableAction, Encoded> ActionPipelineRegistry<A, Encoded> {
         self.next_id = 0;
     }
 
-    pub fn contains(&self, handle: PipelineHandle) -> bool {
-        self.slots
-            .get(handle.0)
-            .map_or(false, |slot| slot.is_some())
+    pub fn contains(&self, id: EncoderId) -> bool {
+        self.slots.get(id.0).map_or(false, |slot| slot.is_some())
     }
 
     pub fn contains_key(&self, key: &str) -> bool {
@@ -282,12 +284,12 @@ impl<A: EncodableAction, Encoded> ActionPipelineRegistry<A, Encoded> {
 #[derive(Debug, Clone)]
 pub struct NoOpEncoder;
 
-impl<A: EncodableAction, Encoded> ActionEncoder<A, Encoded> for NoOpEncoder {
-    fn encode(&self, _cmd: A, _ctx: &A::Ctx) -> anyhow::Result<Vec<Encoded>> {
+impl<Req: EncodableRequest, Encoded> Encoder<Req, Encoded> for NoOpEncoder {
+    fn encode(&self, _cmd: Req, _ctx: &Req::Ctx) -> anyhow::Result<Vec<Encoded>> {
         Ok(Vec::new())
     }
 
-    fn supports(&self, _cmd: &A) -> bool {
+    fn supports(&self, _cmd: &Req) -> bool {
         false
     }
 }
@@ -298,6 +300,6 @@ impl<A: EncodableAction, Encoded> ActionEncoder<A, Encoded> for NoOpEncoder {
 #[derive(Debug, Clone, Default)]
 pub struct NullEncodableAction;
 
-impl EncodableAction for NullEncodableAction {
+impl EncodableRequest for NullEncodableAction {
     type Ctx = ();
 }

@@ -19,7 +19,7 @@ use crate::connector::features::shared::actions::StreamActionRaw;
 use crate::connector::features::websocket::stream::WebSocketCommand;
 use crate::io::mpmc::MpmcSender;
 use crate::io::ringbuffer::RingSender;
-use crate::utils::pipeline::{ActionPipelineRegistry, EncodableAction};
+use crate::utils::pipeline::{EncodableRequest, EncoderRegistry};
 use crate::utils::time::Timeframe;
 use crate::utils::{CancelToken, SharedStr, StateCell};
 
@@ -56,11 +56,11 @@ pub struct CompositeConnectorConfig {
     pub ensure_interval: Option<Timeframe>,
 }
 
-pub struct CompositeConnector<E: StreamEventParsed, A: EncodableAction> {
+pub struct CompositeConnector<E: StreamEventParsed, A: EncodableRequest> {
     cancel_token: CancelToken,
     reserved_core_ids: Option<Vec<usize>>,
     slots: HashMap<SharedStr, StreamSlot<E>>,
-    pub(crate) action_pipelines: ActionPipelineRegistry<A, CompositeAction>,
+    pub(crate) action_pipelines: EncoderRegistry<A, CompositeAction>,
     pub(crate) event_tx: MpmcSender<StreamEvent<E>>,
     ensure_interval: Option<Duration>,
     max_streams: usize,
@@ -73,10 +73,10 @@ pub struct CompositeConnector<E: StreamEventParsed, A: EncodableAction> {
     grpc: ConnectorInner<GrpcConnector>,
 }
 
-impl<E: StreamEventParsed, A: EncodableAction> CompositeConnector<E, A> {
+impl<E: StreamEventParsed, A: EncodableRequest> CompositeConnector<E, A> {
     pub fn new(
         config: CompositeConnectorConfig,
-        action_pipelines: ActionPipelineRegistry<A, CompositeAction>,
+        action_pipelines: EncoderRegistry<A, CompositeAction>,
         cancel_token: CancelToken,
         reserved_core_ids: Option<Vec<usize>>,
         event_tx: MpmcSender<StreamEvent<E>>,
@@ -389,11 +389,11 @@ impl<E: StreamEventParsed, A: EncodableAction> CompositeConnector<E, A> {
             .and_then(|stream| stream.ws_state())
     }
 
-    pub fn action_pipelines(&self) -> &ActionPipelineRegistry<A, CompositeAction> {
+    pub fn action_pipelines(&self) -> &EncoderRegistry<A, CompositeAction> {
         &self.action_pipelines
     }
 
-    pub fn action_pipelines_mut(&mut self) -> &mut ActionPipelineRegistry<A, CompositeAction> {
+    pub fn action_pipelines_mut(&mut self) -> &mut EncoderRegistry<A, CompositeAction> {
         &mut self.action_pipelines
     }
 }

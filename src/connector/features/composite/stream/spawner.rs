@@ -12,10 +12,10 @@ use crate::{
             },
         },
     },
-    utils::pipeline::EncodableAction,
+    utils::pipeline::EncodableRequest,
 };
 
-impl<E: StreamEventParsed, A: EncodableAction> CompositeConnector<E, A> {
+impl<E: StreamEventParsed, A: EncodableRequest> CompositeConnector<E, A> {
     pub fn spawn_stream(
         &self,
         spec: &StreamSpec,
