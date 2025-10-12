@@ -7,12 +7,11 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::fmt::Debug;
-use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
 /// Marker for a clonable, sendable model context.
-pub trait ModelContext: Sync + Send + 'static {}
+pub trait ModelContext: Send + 'static {}
 
 /// Marker for a clonable, sendable model event.
 pub trait ModelEvent: Send + 'static + Clone {}
@@ -129,7 +128,7 @@ pub trait BaseModel: Sized {
     /// `cancel_token` is a child of the runtime root token.
     fn initialize(
         config: Self::Config,
-        ctx: Arc<Self::Ctx>,
+        ctx: &Self::Ctx,
         reserved_core_id: Option<usize>,
         output_tx: Self::OutputTx,
         cancel_token: CancelToken,

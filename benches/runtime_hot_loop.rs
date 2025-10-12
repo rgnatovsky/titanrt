@@ -1,6 +1,5 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -38,7 +37,7 @@ impl BaseModel for HotModel {
 
     fn initialize(
         cfg: Self::Config,
-        _ctx: Arc<Self::Ctx>,
+        _ctx: &Self::Ctx,
         _reserved_core_id: Option<usize>,
         outputs: Self::OutputTx,
         cancel_token: CancelToken,
