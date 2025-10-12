@@ -83,6 +83,7 @@ impl<Model: BaseModel> Runtime<Model> {
         mut model_cfg: Model::Config,
         mut output_tx: Model::OutputTx,
     ) -> Result<Self> {
+        let ctx = Arc::new(ctx);
         let max_inputs_pending = cfg.max_inputs_pending.unwrap_or(1024);
         let max_inputs_drain = cfg.max_inputs_drain.unwrap_or(max_inputs_pending);
         let stop_model_timeout = cfg.stop_model_timeout.unwrap_or(300);
@@ -124,8 +125,8 @@ impl<Model: BaseModel> Runtime<Model> {
                 let mut maybe_model: Option<Model> = if cfg.init_model_on_start {
                     let model_cfg_clone = model_cfg.clone();
                     match Model::initialize(
-                        &ctx,
                         model_cfg_clone,
+                        ctx.clone(),
                         core_id,
                         output_tx.clone(),
                         cancel_token.new_child(),
@@ -181,8 +182,8 @@ impl<Model: BaseModel> Runtime<Model> {
                         ControllerResult::InitModel(maybe_corr_id) => {
                             tracing::info!("[TradingRuntime] model init");
                             maybe_model = match Model::initialize(
-                                &ctx,
                                 model_cfg.clone(),
+                                ctx.clone(),
                                 core_id,
                                 output_tx.clone(),
                                 cancel_token.new_child(),

@@ -9,6 +9,7 @@ mod tests {
     use crate::utils::*;
     use serde::{Deserialize, Serialize};
     use serde_json::json;
+    use std::sync::Arc;
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -47,8 +48,8 @@ mod tests {
         type Ctx = NullModelCtx;
 
         fn initialize(
-            _ctx: &Self::Ctx,
             cfg: Self::Config,
+            _ctx: Arc<Self::Ctx>,
             _reserved_core_id: Option<usize>,
             output_tx: Self::OutputTx,
             cancel_token: CancelToken,
