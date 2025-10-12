@@ -11,7 +11,7 @@ use std::time::Duration;
 use uuid::Uuid;
 
 /// Marker for a clonable, sendable model context.
-pub trait ModelContext: Send + 'static + Clone {}
+pub trait ModelContext: Send + 'static  {}
 
 /// Marker for a clonable, sendable model event.
 pub trait ModelEvent: Send + 'static + Clone {}
@@ -127,7 +127,7 @@ pub trait BaseModel: Sized {
     /// `reserved_core_id` is provided for affinity-aware setups;
     /// `cancel_token` is a child of the runtime root token.
     fn initialize(
-        ctx: Self::Ctx,
+        ctx: &Self::Ctx,
         config: Self::Config,
         reserved_core_id: Option<usize>,
         output_tx: Self::OutputTx,

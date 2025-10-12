@@ -177,7 +177,7 @@ impl<A: EncodableAction, Encoded> ActionPipeline<A, Encoded> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ActionPipelineRegistry<A: EncodableAction, Encoded> {
     default: ActionPipeline<A, Encoded>,
     by_key: HashMap<String, ActionPipeline<A, Encoded>>,

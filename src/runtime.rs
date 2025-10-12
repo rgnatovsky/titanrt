@@ -124,7 +124,7 @@ impl<Model: BaseModel> Runtime<Model> {
                 let mut maybe_model: Option<Model> = if cfg.init_model_on_start {
                     let model_cfg_clone = model_cfg.clone();
                     match Model::initialize(
-                        ctx.clone(),
+                        &ctx,
                         model_cfg_clone,
                         core_id,
                         output_tx.clone(),
@@ -181,7 +181,7 @@ impl<Model: BaseModel> Runtime<Model> {
                         ControllerResult::InitModel(maybe_corr_id) => {
                             tracing::info!("[TradingRuntime] model init");
                             maybe_model = match Model::initialize(
-                                ctx.clone(),
+                                &ctx,
                                 model_cfg.clone(),
                                 core_id,
                                 output_tx.clone(),

@@ -47,7 +47,7 @@ mod tests {
         type Ctx = NullModelCtx;
 
         fn initialize(
-            _ctx: Self::Ctx,
+            _ctx: &Self::Ctx,
             cfg: Self::Config,
             _reserved_core_id: Option<usize>,
             output_tx: Self::OutputTx,
