@@ -223,7 +223,9 @@ impl<E> StreamEventRoute<E> {
 /// Adapters translate raw connector events into unified trading payloads.
 pub trait StreamEventParser<E>: Debug + Send + Sync + 'static {
     /// Human readable identifier.
-    fn name(&self) -> &str;
+    fn name(&self) -> &str {
+        std::any::type_name::<Self>()
+    }
 
     /// Convert an HTTP stream event into a trading payload.
     fn from_http(

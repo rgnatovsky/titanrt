@@ -12,9 +12,6 @@ pub trait EncodableAction: Debug + Clone + 'static {
     /// This provides type-safe context instead of using `HashMap<String, Value>`.
     /// Commands can define their own context types with specific fields.
     type Ctx: Send + Default + Debug + Clone + 'static;
-
-    /// Get the encoder id for this command: e.g., "bybit"
-    fn encoder_key(&self) -> impl AsRef<str>;
 }
 
 /// Action encoder trait - converts commands to venue-specific actions
@@ -28,7 +25,10 @@ pub trait ActionEncoder<A: EncodableAction, Encoded>: Sync + Debug + Send {
     fn encode(&self, cmd: A, ctx: &A::Ctx) -> anyhow::Result<Vec<Encoded>>;
 
     /// Get the venue ID this processor handles
-    fn key(&self) -> &str;
+    /// Default implementation returns the type name
+    fn name(&self) -> &str {
+        std::any::type_name::<Self>()
+    }
 
     /// Optional: validate if command is supported
     fn supports(&self, cmd: &A) -> bool;
@@ -45,32 +45,34 @@ pub struct ActionPipeline<Cmd: EncodableAction, Encoded> {
     /// Pipeline passes (for preprocessing commands, validating, etc.)
     passes: Vec<Arc<dyn ActionPass<Cmd>>>,
     /// Venue-specific encoders (keyed by venue ID)
-    encoders: HashMap<String, Arc<dyn ActionEncoder<Cmd, Encoded>>>,
+    encoder: Arc<dyn ActionEncoder<Cmd, Encoded>>,
     /// Default context for preprocessing and encoding (type-safe!)
     default_ctx: Cmd::Ctx,
 }
 
-impl<Cmd: EncodableAction, Encoded> ActionPipeline<Cmd, Encoded>
-where
-    Cmd::Ctx: Default,
-{
-    pub fn new() -> Self {
+impl<A: EncodableAction, Encoded> ActionPipeline<A, Encoded> {
+    pub fn new(encoder: Arc<dyn ActionEncoder<A, Encoded>>, ctx: Option<A::Ctx>) -> Self {
         Self {
             passes: Vec::new(),
-            encoders: HashMap::new(),
-            default_ctx: Cmd::Ctx::default(),
+            encoder,
+            default_ctx: ctx.unwrap_or_default(),
         }
     }
-}
 
-impl<A: EncodableAction, Encoded> ActionPipeline<A, Encoded> {
-    /// Create a new pipeline with a specific default context
-    pub fn with_default_context(ctx: A::Ctx) -> Self {
+    /// Create a new pipeline with a default no-op encoder
+    pub fn with_default_encoder() -> Self
+    where
+        A::Ctx: Default,
+    {
         Self {
             passes: Vec::new(),
-            encoders: HashMap::new(),
-            default_ctx: ctx,
+            encoder: Arc::new(NoOpEncoder),
+            default_ctx: A::Ctx::default(),
         }
+    }
+
+    pub fn set_encoder(&mut self, encoder: Arc<dyn ActionEncoder<A, Encoded>>) {
+        self.encoder = encoder;
     }
 
     /// Register a venue-specific processor
@@ -81,13 +83,6 @@ impl<A: EncodableAction, Encoded> ActionPipeline<A, Encoded> {
     /// Set the default context
     pub fn set_default_context(&mut self, ctx: A::Ctx) {
         self.default_ctx = ctx;
-    }
-
-    /// Register a venue-specific encoder
-    ///
-    /// This allows different encoding settings per venue (e.g., different timeouts)
-    pub fn register_encoder(&mut self, encoder: Arc<dyn ActionEncoder<A, Encoded>>) {
-        self.encoders.insert(encoder.key().to_string(), encoder);
     }
 
     /// Execute a command
@@ -101,34 +96,11 @@ impl<A: EncodableAction, Encoded> ActionPipeline<A, Encoded> {
             cmd = p.run(cmd, ctx)?;
         }
 
-        let enc = self
-            .encoders
-            .get(cmd.encoder_key().as_ref())
-            .ok_or_else(|| {
-                anyhow::anyhow!("no encoder for venue={}", cmd.encoder_key().as_ref())
-            })?;
-
-        enc.encode(cmd, ctx)
-    }
-
-    /// Check if venue is supported
-    pub fn supports_venue(&self, venue: impl AsRef<str>) -> bool {
-        self.encoders.contains_key(venue.as_ref())
-    }
-
-    /// Get list of supported venues
-    pub fn supported_venues(&self) -> Vec<&str> {
-        self.encoders.values().map(|p| p.key()).collect()
+        self.encoder.encode(cmd, ctx)
     }
 
     pub fn supports_cmd(&self, cmd: &A) -> bool {
-        self.encoders.values().any(|p| p.supports(cmd))
-    }
-    pub fn supports_venue_cmd(&self, venue: impl AsRef<str>, cmd: &A) -> bool {
-        self.encoders
-            .get(venue.as_ref())
-            .map(|p| p.supports(cmd))
-            .unwrap_or(false)
+        self.encoder.supports(cmd)
     }
 
     /// Remove all passes from the pipeline
@@ -149,23 +121,6 @@ impl<A: EncodableAction, Encoded> ActionPipeline<A, Encoded> {
     pub fn pass_count(&self) -> usize {
         self.passes.len()
     }
-    /// Remove all encoders from the pipeline
-    pub fn clear_encoders(&mut self) {
-        self.encoders.clear();
-    }
-
-    /// Remove encoder for specific venue, returns the removed encoder if exists
-    pub fn remove_encoder(
-        &mut self,
-        venue: impl AsRef<str>,
-    ) -> Option<Arc<dyn ActionEncoder<A, Encoded>>> {
-        self.encoders.remove(venue.as_ref())
-    }
-
-    /// Get number of registered encoders
-    pub fn encoder_count(&self) -> usize {
-        self.encoders.len()
-    }
 
     /// Reset pipeline to default state
     pub fn reset(&mut self)
@@ -173,7 +128,6 @@ impl<A: EncodableAction, Encoded> ActionPipeline<A, Encoded> {
         A::Ctx: Default,
     {
         self.clear_passes();
-        self.clear_encoders();
         self.default_ctx = A::Ctx::default();
     }
 }
@@ -190,14 +144,14 @@ where
 {
     pub fn new(default: Option<ActionPipeline<Cmd, Encoded>>) -> Self {
         Self {
-            default: default.unwrap_or_else(ActionPipeline::new),
+            default: default.unwrap_or_else(ActionPipeline::with_default_encoder),
             by_key: HashMap::new(),
         }
     }
 
     pub fn reset(&mut self) {
         self.clear();
-        self.override_default(ActionPipeline::new());
+        self.override_default(ActionPipeline::with_default_encoder());
     }
 }
 
@@ -234,6 +188,20 @@ impl<A: EncodableAction, Encoded> ActionPipelineRegistry<A, Encoded> {
     }
 }
 
+/// Default no-op encoder that does nothing
+#[derive(Debug, Clone)]
+pub struct NoOpEncoder;
+
+impl<A: EncodableAction, Encoded> ActionEncoder<A, Encoded> for NoOpEncoder {
+    fn encode(&self, _cmd: A, _ctx: &A::Ctx) -> anyhow::Result<Vec<Encoded>> {
+        Ok(Vec::new())
+    }
+
+    fn supports(&self, _cmd: &A) -> bool {
+        false
+    }
+}
+
 /// Null implementation of UnifiedAction for bots that don't use action pipeline.
 ///
 /// This allows existing code to work without changes by using `Bot<E, I, O, NullUnifiedAction>`.
@@ -242,8 +210,4 @@ pub struct NullEncodableAction;
 
 impl EncodableAction for NullEncodableAction {
     type Ctx = ();
-
-    fn encoder_key(&self) -> impl AsRef<str> {
-        "null"
-    }
 }
