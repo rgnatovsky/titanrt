@@ -389,11 +389,11 @@ impl<E: StreamEventParsed, A: EncodableRequest> CompositeConnector<E, A> {
             .and_then(|stream| stream.ws_state())
     }
 
-    pub fn action_pipelines(&self) -> &EncoderRegistry<A, CompositeAction> {
+    pub fn encoders(&self) -> &EncoderRegistry<A, CompositeAction> {
         &self.encoders
     }
 
-    pub fn action_pipelines_mut(&mut self) -> &mut EncoderRegistry<A, CompositeAction> {
+    pub fn encoders_mut(&mut self) -> &mut EncoderRegistry<A, CompositeAction> {
         &mut self.encoders
     }
 }
