@@ -130,9 +130,9 @@ impl<E: StreamEventParsed, A: EncodableRequest> CompositeConnector<E, A> {
         } = req;
 
         let pipeline = match via {
-            Selector::Default => Some(self.action_pipelines.get_default()),
-            Selector::Id(h) => self.action_pipelines.get(h),
-            Selector::Key(k) => self.action_pipelines.get_by_key(k),
+            Selector::Default => Some(self.encoders.get_default()),
+            Selector::Id(h) => self.encoders.get(h),
+            Selector::Key(k) => self.encoders.get_by_key(k),
         };
 
         let pipeline = match pipeline {

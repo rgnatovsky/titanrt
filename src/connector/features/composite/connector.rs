@@ -60,7 +60,7 @@ pub struct CompositeConnector<E: StreamEventParsed, A: EncodableRequest> {
     cancel_token: CancelToken,
     reserved_core_ids: Option<Vec<usize>>,
     slots: HashMap<SharedStr, StreamSlot<E>>,
-    pub(crate) action_pipelines: EncoderRegistry<A, CompositeAction>,
+    pub(crate) encoders: EncoderRegistry<A, CompositeAction>,
     pub(crate) event_tx: MpmcSender<StreamEvent<E>>,
     ensure_interval: Option<Duration>,
     max_streams: usize,
@@ -88,7 +88,7 @@ impl<E: StreamEventParsed, A: EncodableRequest> CompositeConnector<E, A> {
             http: ConnectorInner::new(config.http, config.cancel_streams_policy),
             #[cfg(feature = "grpc_conn")]
             grpc: ConnectorInner::new(config.grpc, config.cancel_streams_policy),
-            action_pipelines,
+            encoders: action_pipelines,
             cancel_token,
             reserved_core_ids,
             event_tx,
@@ -390,10 +390,10 @@ impl<E: StreamEventParsed, A: EncodableRequest> CompositeConnector<E, A> {
     }
 
     pub fn action_pipelines(&self) -> &EncoderRegistry<A, CompositeAction> {
-        &self.action_pipelines
+        &self.encoders
     }
 
     pub fn action_pipelines_mut(&mut self) -> &mut EncoderRegistry<A, CompositeAction> {
-        &mut self.action_pipelines
+        &mut self.encoders
     }
 }
