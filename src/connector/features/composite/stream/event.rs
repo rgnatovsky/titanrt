@@ -1,6 +1,7 @@
 use crate::connector::features::composite::stream::StreamKind;
 use crate::utils::MatchTarget;
 use crate::utils::RouteMatcher;
+use crate::utils::StateCell;
 use crate::utils::StringTokens;
 use crate::utils::{Reducer, SharedStr, StateMarker};
 use crate::{
@@ -19,11 +20,11 @@ use std::sync::Arc;
 use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
-pub struct EventRouteRegistry<E> {
+pub struct EventRouteRegistry<E: StreamEventParsed> {
     map: HashMap<SharedStr, Vec<StreamEventRoute<E>>>,
 }
 
-impl<E> EventRouteRegistry<E> {
+impl<E: StreamEventParsed> EventRouteRegistry<E> {
     pub fn new() -> Self {
         Self {
             map: HashMap::new(),
@@ -71,7 +72,7 @@ impl<E> EventRouteRegistry<E> {
 
 /// Context shared between stream events from hooks and strategies.
 #[derive(Debug, Clone)]
-pub struct StreamEventContext<E> {
+pub struct StreamEventContext<E: StreamEventParsed> {
     stream: SharedStr,
     kind: StreamKind,
     routes: Vec<StreamEventRoute<E>>,
@@ -79,7 +80,7 @@ pub struct StreamEventContext<E> {
     metadata: HashMap<String, Value>,
 }
 
-impl<E> StreamEventContext<E> {
+impl<E: StreamEventParsed> StreamEventContext<E> {
     pub fn new(stream: &str, kind: StreamKind) -> Self {
         let tokens = StringTokens::parse(stream);
 
@@ -183,13 +184,13 @@ impl<E> StreamEventContext<E> {
 }
 
 #[derive(Clone, Debug)]
-pub struct StreamEventRoute<E> {
+pub struct StreamEventRoute<E: StreamEventParsed> {
     id: SharedStr,
     matcher: RouteMatcher,
     parser: Arc<dyn StreamEventParser<E>>,
 }
 
-impl<E> StreamEventRoute<E> {
+impl<E: StreamEventParsed> StreamEventRoute<E> {
     pub fn new(
         id: impl Into<SharedStr>,
         matcher: RouteMatcher,
@@ -221,7 +222,10 @@ impl<E> StreamEventRoute<E> {
 }
 
 /// Adapters translate raw connector events into unified trading payloads.
-pub trait StreamEventParser<E>: Debug + Send + Sync + 'static {
+pub trait StreamEventParser<E>: Debug + Send + Sync + 'static
+where
+    E: StreamEventParsed,
+{
     /// Human readable identifier.
     fn name(&self) -> &str {
         std::any::type_name::<Self>()
@@ -233,6 +237,8 @@ pub trait StreamEventParser<E>: Debug + Send + Sync + 'static {
         _event: StreamEventRaw<HttpEvent>,
         _route: &StreamEventRoute<E>,
         _desc: &HttpDescriptor<StreamEventContext<E>>,
+        _reducer: &mut E::HttpReducer,
+        _state: &StateCell<E::HttpState>,
     ) -> Option<E> {
         None
     }
@@ -243,6 +249,8 @@ pub trait StreamEventParser<E>: Debug + Send + Sync + 'static {
         _event: StreamEventRaw<GrpcEvent>,
         _route: &StreamEventRoute<E>,
         _desc: &GrpcDescriptor<StreamEventContext<E>>,
+        _reducer: &mut E::GrpcReducer,
+        _state: &StateCell<E::GrpcState>,
     ) -> Option<E> {
         None
     }
@@ -253,6 +261,8 @@ pub trait StreamEventParser<E>: Debug + Send + Sync + 'static {
         _event: StreamEventRaw<WebSocketEvent>,
         _route: &StreamEventRoute<E>,
         _desc: &WebSocketStreamDescriptor<StreamEventContext<E>>,
+        _reducer: &mut E::WsReducer,
+        _state: &StateCell<E::WsState>,
     ) -> Option<E> {
         None
     }

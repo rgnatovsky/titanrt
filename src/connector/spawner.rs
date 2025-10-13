@@ -78,9 +78,13 @@ where
                 return Err(err);
             }
         };
+        let mut reducer = R::default();
 
-        // Shared state + health
-        let state = StateCell::<S>::new_default();
+        let mut state = S::default();
+        state.configure(&desc, &mut reducer);
+
+        let state = Arc::new(StateCell::<S>::new(state));
+
         let health = HealthFlag::new(desc.health_at_start());
 
         // Channels: actions (model->worker)
@@ -104,7 +108,6 @@ where
             EventTxType::External(tx) => (tx, None),
         };
 
-        let reducer = R::default();
         // Unique stream id
         let stream_id = Uuid::new_v4().simple();
 

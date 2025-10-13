@@ -19,7 +19,9 @@ impl Reducer for NullReducer {}
 /// States can optionally support internal mutation without replacing
 /// the entire snapshot by implementing mutation methods that work
 /// with interior mutability (e.g., via `RwLock`, `Mutex`, atomics).
-pub trait StateMarker: Default + Sync + Send + 'static {}
+pub trait StateMarker: Default + Sync + Send + 'static {
+    fn configure<D>(&mut self, _desc: D, _reducer: &mut impl Reducer) {}
+}
 
 /// Empty state marker for cases where no state is needed.
 #[derive(Default)]

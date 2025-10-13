@@ -30,21 +30,31 @@ fn send_event<E: StreamEventParsed>(
 }
 
 #[inline]
-fn process_event<E, RawEvent, Desc, F>(
+fn process_event<E, RawEvent, Desc, R, State, F>(
     ctx: &StreamEventContext<E>,
     raw: StreamEventRaw<RawEvent>,
     desc: &Desc,
     event_tx: &mut MpmcSender<StreamEvent<E>>,
+    reducer: &mut R,
+    state: &crate::utils::StateCell<State>,
     stream_type: &str,
     use_parser: F,
 ) -> Option<StreamEventRaw<RawEvent>>
 where
     RawEvent: StreamEventInner,
     E: StreamEventParsed,
-    F: FnOnce(StreamEventRaw<RawEvent>, &StreamEventRoute<E>, &Desc) -> Option<E>,
+    R: crate::utils::Reducer,
+    State: crate::utils::StateMarker,
+    F: FnOnce(
+        StreamEventRaw<RawEvent>,
+        &StreamEventRoute<E>,
+        &Desc,
+        &mut R,
+        &crate::utils::StateCell<State>,
+    ) -> Option<E>,
 {
     if let Some(route) = ctx.select_route(raw.label(), raw.payload()) {
-        if let Some(event) = use_parser(raw, &route, desc) {
+        if let Some(event) = use_parser(raw, &route, desc, reducer, state) {
             send_event(
                 event_tx,
                 StreamEvent {
@@ -84,8 +94,12 @@ pub fn http_hook<E>(
         args.raw,
         args.desc,
         args.event_tx,
+        args.reducer,
+        args.state,
         "http",
-        |raw, route, desc| route.parser().from_http(raw, route, desc),
+        |raw, route, desc, reducer, state| {
+            route.parser().from_http(raw, route, desc, reducer, state)
+        },
     );
 
     if let Some(raw) = maybe_raw {
@@ -124,8 +138,12 @@ pub fn grpc_hook<E>(
         args.raw,
         args.desc,
         args.event_tx,
+        args.reducer,
+        args.state,
         "grpc",
-        |raw, route, desc| route.parser().from_grpc(raw, route, desc),
+        |raw, route, desc, reducer, state| {
+            route.parser().from_grpc(raw, route, desc, reducer, state)
+        },
     );
 
     if let Some(raw) = maybe_raw {
@@ -164,8 +182,10 @@ pub fn ws_hook<E>(
         args.raw,
         args.desc,
         args.event_tx,
+        args.reducer,
+        args.state,
         "ws",
-        |raw, route, desc| route.parser().from_ws(raw, route, desc),
+        |raw, route, desc, reducer, state| route.parser().from_ws(raw, route, desc, reducer, state),
     );
 
     if let Some(raw) = maybe_raw {
