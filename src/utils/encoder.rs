@@ -35,8 +35,8 @@ pub trait Encoder<Req: EncodableRequest, Encoded>: Sync + Debug + Send {
     fn supports(&self, req: &Req) -> bool;
 }
 
-/// Action pass trait - processes a command and returns a new command
-pub trait ActionPass<Req: EncodableRequest>: Sync + Debug + Send {
+/// Encoder pass trait - processes a command and returns a new command
+pub trait EncoderPass<Req: EncodableRequest>: Sync + Debug + Send {
     fn run(&self, req: Req, ctx: &Req::Ctx) -> anyhow::Result<Req>;
 }
 
@@ -44,7 +44,7 @@ pub trait ActionPass<Req: EncodableRequest>: Sync + Debug + Send {
 #[derive(Debug, Clone)]
 pub struct EncoderPipeline<Req: EncodableRequest, Encoded> {
     /// Pipeline passes (for preprocessing commands, validating, etc.)
-    passes: Vec<Arc<dyn ActionPass<Req>>>,
+    passes: Vec<Arc<dyn EncoderPass<Req>>>,
     /// Venue-specific encoders (keyed by venue ID)
     encoder: Arc<dyn Encoder<Req, Encoded>>,
     /// Default context for preprocessing and encoding (type-safe!)
@@ -77,7 +77,7 @@ impl<Req: EncodableRequest, Encoded> EncoderPipeline<Req, Encoded> {
     }
 
     /// Register a venue-specific processor
-    pub fn register_pass(&mut self, processor: Arc<dyn ActionPass<Req>>) {
+    pub fn register_pass(&mut self, processor: Arc<dyn EncoderPass<Req>>) {
         self.passes.push(processor);
     }
 
@@ -114,7 +114,7 @@ impl<Req: EncodableRequest, Encoded> EncoderPipeline<Req, Encoded> {
     }
 
     /// Remove a pass at specific index, returns the removed pass if exists
-    pub fn remove_pass(&mut self, index: usize) -> Option<Arc<dyn ActionPass<Req>>> {
+    pub fn remove_pass(&mut self, index: usize) -> Option<Arc<dyn EncoderPass<Req>>> {
         if index < self.passes.len() {
             Some(self.passes.remove(index))
         } else {

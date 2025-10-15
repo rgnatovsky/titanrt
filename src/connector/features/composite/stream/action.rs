@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{
     connector::features::{
         composite::{CompositeConnector, stream::event::StreamEventParsed},
@@ -9,7 +11,7 @@ use crate::{
         websocket::stream::WebSocketCommand,
     },
     prelude::BaseTx,
-    utils::pipeline::{EncodableRequest, EncoderId},
+    utils::encoder::{EncodableRequest, EncoderId},
 };
 
 #[derive(Debug, Clone)]

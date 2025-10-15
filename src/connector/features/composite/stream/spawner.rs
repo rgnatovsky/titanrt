@@ -12,7 +12,7 @@ use crate::{
             },
         },
     },
-    utils::pipeline::EncodableRequest,
+    utils::encoder::EncodableRequest,
 };
 
 impl<E: StreamEventParsed, A: EncodableRequest> CompositeConnector<E, A> {

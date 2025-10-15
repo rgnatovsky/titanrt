@@ -5,7 +5,7 @@ pub use route_matcher::{MatchTarget, RouteMatcher};
 pub use shared_str::SharedStr;
 pub use state::*;
 pub use str_tokens::StringTokens;
-
+pub use request_manager::RequestManager;
 pub mod backoff;
 mod cancel_token;
 mod core_pinner;
@@ -19,4 +19,5 @@ mod shared_str;
 mod state;
 mod str_tokens;
 pub mod time;
-pub mod pipeline;
+pub mod encoder;
+mod request_manager;

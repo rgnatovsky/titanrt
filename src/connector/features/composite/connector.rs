@@ -19,7 +19,7 @@ use crate::connector::features::shared::actions::StreamActionRaw;
 use crate::connector::features::websocket::stream::WebSocketCommand;
 use crate::io::mpmc::MpmcSender;
 use crate::io::ringbuffer::RingSender;
-use crate::utils::pipeline::{EncodableRequest, EncoderRegistry};
+use crate::utils::encoder::{EncodableRequest, EncoderRegistry};
 use crate::utils::time::Timeframe;
 use crate::utils::{CancelToken, SharedStr, StateCell};
 
