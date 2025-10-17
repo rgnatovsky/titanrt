@@ -1,4 +1,8 @@
-use std::ops::{Add, Div};
+use std::{
+    collections::HashMap,
+    hash::Hash,
+    ops::{Add, Div},
+};
 
 use rand::{
     Rng,
@@ -10,11 +14,11 @@ use rand::{
 
 use crate::utils::floatings::round_f64;
 
-pub struct Sampler<'a, T> {
+pub struct SmartIter<'a, T> {
     items: &'a [T],
 }
 
-impl<'a, T> Sampler<'a, T> {
+impl<'a, T> SmartIter<'a, T> {
     pub fn new(items: &'a [T]) -> Self {
         Self { items }
     }
@@ -184,7 +188,7 @@ impl<'a, T> Sampler<'a, T> {
     }
 }
 
-impl<'a, T> Sampler<'a, T>
+impl<'a, T> SmartIter<'a, T>
 where
     T: PartialOrd + Copy,
 {
@@ -201,7 +205,7 @@ where
     }
 }
 
-impl<'a, T> Sampler<'a, T>
+impl<'a, T> SmartIter<'a, T>
 where
     T: PartialOrd + Copy + Ord,
 {
@@ -214,7 +218,7 @@ where
     }
 }
 
-impl<'a, T> Sampler<'a, T>
+impl<'a, T> SmartIter<'a, T>
 where
     T: Add<Output = T> + Copy + Default,
 {
@@ -227,7 +231,7 @@ where
     }
 }
 
-impl<'a, T> Sampler<'a, T>
+impl<'a, T> SmartIter<'a, T>
 where
     T: Add<Output = T> + Div<Output = T> + Copy + Default + From<usize>,
 {
@@ -242,7 +246,7 @@ where
     }
 }
 
-impl Sampler<'_, f64> {
+impl SmartIter<'_, f64> {
     pub fn sum_with_precision(&self, precision: i32) -> f64 {
         self.items
             .iter()
@@ -291,7 +295,79 @@ impl Sampler<'_, f64> {
     }
 }
 
-impl<'a, T> Sampler<'a, T> {
+impl<'a, T> SmartIter<'a, T> {
+    pub fn group_by<K, F>(&self, key_fn: F) -> HashMap<K, Vec<&'a T>>
+    where
+        K: Eq + Hash,
+        F: Fn(&T) -> K,
+    {
+        let mut groups: HashMap<K, Vec<&T>> = HashMap::new();
+        for item in self.items.iter() {
+            let key = key_fn(item);
+            groups.entry(key).or_default().push(item);
+        }
+        groups
+    }
+
+    pub fn sorted(&self) -> Vec<&'a T>
+    where
+        T: Ord,
+    {
+        let mut sorted: Vec<&T> = self.items.iter().collect();
+        sorted.sort();
+        sorted
+    }
+
+    pub fn sorted_by<F>(&self, compare: F) -> Vec<&'a T>
+    where
+        F: FnMut(&&T, &&T) -> std::cmp::Ordering,
+    {
+        let mut sorted: Vec<&T> = self.items.iter().collect();
+        sorted.sort_by(compare);
+        sorted
+    }
+
+    pub fn sorted_by_key<K, F>(&self, key_fn: F) -> Vec<&'a T>
+    where
+        K: Ord,
+        F: FnMut(&&T) -> K,
+    {
+        let mut sorted: Vec<&T> = self.items.iter().collect();
+        sorted.sort_by_key(key_fn);
+        sorted
+    }
+
+    pub fn unique(&self) -> Vec<&'a T>
+    where
+        T: Eq + Hash,
+    {
+        use std::collections::HashSet;
+        let mut seen = HashSet::new();
+        self.items
+            .iter()
+            .filter(|item| seen.insert(*item))
+            .collect()
+    }
+
+    pub fn dedup(&self) -> Vec<&'a T>
+    where
+        T: PartialEq,
+    {
+        let mut result = Vec::new();
+        let mut last: Option<&T> = None;
+
+        for item in self.items.iter() {
+            if last != Some(item) {
+                result.push(item);
+                last = Some(item);
+            }
+        }
+
+        result
+    }
+}
+
+impl<'a, T> SmartIter<'a, T> {
     /// Количество элементов
     pub fn len(&self) -> usize {
         self.items.len()
@@ -310,5 +386,90 @@ impl<'a, T> Sampler<'a, T> {
     /// Итератор по элементам
     pub fn iter(&self) -> impl Iterator<Item = &'a T> {
         self.items.iter()
+    }
+    pub fn chain<'b>(&'b self, other: &'b SmartIter<'a, T>) -> impl Iterator<Item = &'a T> + 'b {
+        self.items.iter().chain(other.items.iter())
+    }
+
+    /// Zip с другой коллекцией
+    pub fn zip<U>(&'a self, other: &'a [U]) -> impl Iterator<Item = (&'a T, &'a U)> {
+        self.items.iter().zip(other.iter())
+    }
+
+    /// Enumerate: с индексами
+    pub fn enumerate(&self) -> impl Iterator<Item = (usize, &T)> {
+        self.items.iter().enumerate()
+    }
+
+    /// Take: первые N элементов
+    pub fn take(&self, n: usize) -> Vec<&'a T> {
+        self.items.iter().take(n).collect()
+    }
+
+    /// Skip: пропустить первые N
+    pub fn skip(&self, n: usize) -> Vec<&'a T> {
+        self.items.iter().skip(n).collect()
+    }
+
+    /// Chunks: разбить на куски
+    pub fn chunks(&self, size: usize) -> impl Iterator<Item = &[T]> {
+        self.items.chunks(size)
+    }
+
+    /// Windows: скользящее окно
+    pub fn windows(&self, size: usize) -> impl Iterator<Item = &[T]> {
+        self.items.windows(size)
+    }
+}
+
+impl<'a, T> IntoIterator for SmartIter<'a, T> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.items.iter()
+    }
+}
+
+impl<'a, 'b, T> IntoIterator for &'b SmartIter<'a, T> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.items.iter()
+    }
+}
+
+impl<'a, T> SmartIter<'a, T> {
+    pub fn collect<B>(&self) -> B
+    where
+        B: FromIterator<&'a T>,
+    {
+        self.items.iter().collect()
+    }
+
+    pub fn to_vec(&self) -> Vec<T>
+    where
+        T: Clone,
+    {
+        self.items.to_vec()
+    }
+
+    pub fn to_set(&self) -> std::collections::HashSet<&'a T>
+    where
+        T: Eq + Hash,
+    {
+        self.items.iter().collect()
+    }
+
+    pub fn select(&self, indices: &[usize]) -> Vec<&'a T> {
+        indices.iter().filter_map(|&i| self.items.get(i)).collect()
+    }
+
+    pub fn pluck<U, F>(&self, f: F) -> Vec<U>
+    where
+        F: Fn(&T) -> U,
+    {
+        self.items.iter().map(f).collect()
     }
 }

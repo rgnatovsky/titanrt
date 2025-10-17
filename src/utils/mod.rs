@@ -3,7 +3,7 @@ pub use core_pinner::*;
 pub use health_flag::*;
 pub use request_manager::RequestIdManager;
 pub use route_matcher::{MatchTarget, RouteMatcher};
-pub use sampler::Sampler;
+pub use smart_iter::SmartIter;
 pub use shared_str::SharedStr;
 pub use state::*;
 pub use str_tokens::StringTokens;
@@ -24,4 +24,4 @@ mod state;
 mod str_tokens;
 pub mod time;
 
-mod sampler;
+mod smart_iter;
