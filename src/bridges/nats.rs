@@ -82,8 +82,8 @@ where
                 Ok(c) => c,
                 Err(e) => {
                     tracing::error!("[NatsBridge] Connect error: {e}");
-                    let mut rng = rand::rng();
-                    let jitter = rng.random_range(0..base_backoff.as_millis() as u64);
+                    let mut rng = rand::thread_rng();
+                    let jitter = rng.gen_range(0..=base_backoff.as_millis() as u64);
                     sleep(base_backoff + Duration::from_millis(jitter)).await;
                     base_backoff = (base_backoff * 2).min(Duration::from_secs(10));
                     continue;
