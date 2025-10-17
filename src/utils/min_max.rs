@@ -9,27 +9,19 @@ pub struct MinMax<T> {
     pub max: T,
 }
 
-impl<T: PartialOrd + Copy + Ord> MinMax<T> {
-    pub fn is_valid(&self) -> bool {
-        self.min <= self.max
+// Блок для всего, где хватает PartialOrd
+impl<T: PartialOrd + Copy> MinMax<T> {
+    pub fn is_within(&self, l: T, h: T) -> bool {
+        l <= self.min && self.max <= h
     }
+    pub fn is_valid(&self) -> bool { self.min <= self.max }
+
     pub fn ordered(self) -> Self {
-        if self.min <= self.max {
-            self
-        } else {
-            Self {
-                min: self.max,
-                max: self.min,
-            }
-        }
+        if self.min <= self.max { self } else { Self { min: self.max, max: self.min } }
     }
 
-    pub fn contains(&self, x: T) -> bool {
-        self.min <= x && x <= self.max
-    }
-    pub fn contains_exclusive(&self, x: T) -> bool {
-        self.min < x && x < self.max
-    }
+    pub fn contains(&self, x: T) -> bool { self.min <= x && x <= self.max }
+    pub fn contains_exclusive(&self, x: T) -> bool { self.min < x && x < self.max }
 
     pub fn contains_range(&self, other: &Self) -> bool {
         self.min <= other.min && other.max <= self.max
@@ -39,51 +31,27 @@ impl<T: PartialOrd + Copy + Ord> MinMax<T> {
     }
 
     pub fn clamp(&self, x: T) -> T {
-        if x < self.min {
-            self.min
-        } else if x > self.max {
-            self.max
-        } else {
-            x
-        }
+        if x < self.min { self.min } else if x > self.max { self.max } else { x }
     }
     pub fn clamp_mut(&mut self, x: &mut T) {
-        if *x < self.min {
-            *x = self.min
-        } else if *x > self.max {
-            *x = self.max
-        }
+        if *x < self.min { *x = self.min } else if *x > self.max { *x = self.max }
     }
+}
 
+// Блок для операций, где реально нужен Ord (min/max)
+impl<T: Ord + Copy> MinMax<T> {
     pub fn union(&self, other: &Self) -> Self {
-        Self {
-            min: self.min.min(other.min),
-            max: self.max.max(other.max),
-        }
+        Self { min: self.min.min(other.min), max: self.max.max(other.max) }
     }
     pub fn intersection(&self, other: &Self) -> Option<Self> {
         let lo = self.min.max(other.min);
         let hi = self.max.min(other.max);
         (lo <= hi).then_some(Self { min: lo, max: hi })
     }
-
-    pub fn expand_to_include(&mut self, x: T) {
-        if x < self.min {
-            self.min = x;
-        }
-        if x > self.max {
-            self.max = x;
-        }
-    }
-
-    pub fn map<U: PartialOrd + Copy + Ord>(self, mut f: impl FnMut(T) -> U) -> MinMax<U> {
-        // если f монотонно возрастает — просто применится; если нет, упорядочим
+    pub fn map<U: Ord + Copy>(self, mut f: impl FnMut(T) -> U) -> MinMax<U> {
         let a = f(self.min);
         let b = f(self.max);
-        MinMax {
-            min: a.min(b),
-            max: a.max(b),
-        }
+        MinMax { min: a.min(b), max: a.max(b) }
     }
 }
 
