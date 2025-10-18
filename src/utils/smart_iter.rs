@@ -96,6 +96,34 @@ impl<'a, T> SmartIter<'a, T> {
         Some(cand[dist.sample(&mut rng)])
     }
 
+    pub fn weighted_sample_k_filtered<Fp, Fw>(&self, k: usize, pass: Fp, weight_fn: Fw) -> Vec<&'a T>
+    where
+        Fp: Fn(&T) -> bool,
+        Fw: Fn(&T) -> f64,
+    {
+        let cand: Vec<&T> = self.items.iter().filter(|item| pass(item)).collect();
+        if cand.is_empty() {
+            return Vec::new();
+        }
+
+        let weights: Vec<f64> = cand.iter().map(|item| weight_fn(item)).collect();
+        if weights.iter().all(|&w| w <= 0.0) {
+            return Vec::new();
+        }
+
+        let dist = match WeightedIndex::new(&weights) {
+            Ok(d) => d,
+            Err(_) => return Vec::new(),
+        };
+
+        let mut rng = thread_rng();
+        let mut result = Vec::with_capacity(k);
+        for _ in 0..k {
+            result.push(cand[dist.sample(&mut rng)]);
+        }
+        result
+    }
+
     pub fn weighted_sample<Fw>(&self, weight_fn: Fw) -> Option<&'a T>
     where
         Fw: Fn(&T) -> f64,
