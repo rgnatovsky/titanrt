@@ -237,7 +237,7 @@ impl<E: StreamEventParsed, A: EncodableRequest> CompositeConnector<E, A> {
     /// Returns `Ok(None)` if the stream was successfully created
     /// Returns `Ok(Some(old_slot))` if the stream was replaced
     pub fn new_slot(&mut self, slot: StreamSlot<E>) -> anyhow::Result<Option<StreamSlot<E>>> {
-        if self.max_streams < self.slots.len() {
+        if self.slots.len() < self.max_streams {
             let stream_name = slot.spec().name.clone();
 
             let old_slot = self.slots.insert(stream_name.clone(), slot);
