@@ -110,10 +110,10 @@ where
 
         // Unique stream id
         let stream_id = Uuid::new_v4().simple();
-
+        let stream_name = self.thread_name(&desc, stream_id);
         // Spawn worker thread
         let handle = thread::Builder::new()
-            .name(self.thread_name(&desc, stream_id))
+            .name(stream_name.clone())
             .spawn({
                 let rt_ctx = RuntimeCtx::new(
                     ctx,
@@ -184,7 +184,7 @@ where
                     health.down();
 
                     if let Err(err) = &res {
-                        tracing::error!("stream {} failed: {}", stream_id, err);
+                        tracing::error!("stream {} failed: {}", stream_name, err);
                     }
 
                     res
