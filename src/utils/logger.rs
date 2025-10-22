@@ -59,6 +59,7 @@ impl LoggerConfig {
             let _ = tracing_subscriber::fmt()
                 .with_max_level(level)
                 .with_writer(nb)
+                .with_ansi(false) 
                 .try_init();
 
             tracing::info!(
