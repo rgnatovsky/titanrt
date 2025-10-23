@@ -14,6 +14,7 @@ use crate::{
     utils::{NullReducer, NullState},
 };
 use serde_json::Value;
+use uuid::Uuid;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -192,13 +193,11 @@ pub struct StreamEventRoute<E: StreamEventParsed> {
 
 impl<E: StreamEventParsed> StreamEventRoute<E> {
     pub fn new(
-        id: impl Into<SharedStr>,
-        matcher: RouteMatcher,
         parser: impl StreamEventParser<E>,
     ) -> Self {
         let route = Self {
-            id: id.into(),
-            matcher: matcher,
+            id: Uuid::new_v4().to_string().into(),
+            matcher: parser.matcher().clone(),
             parser: Arc::new(parser),
         };
         route
@@ -219,6 +218,16 @@ impl<E: StreamEventParsed> StreamEventRoute<E> {
     pub fn match_target(&self) -> MatchTarget {
         self.matcher.extract_targets()
     }
+
+    pub fn with_id(mut self, id: impl Into<SharedStr>) -> Self {
+        self.id = id.into();
+        self
+    }
+
+    pub fn with_matcher(mut self, matcher: RouteMatcher) -> Self {
+        self.matcher = matcher;
+        self
+    }
 }
 
 /// Adapters translate raw connector events into unified trading payloads.
@@ -226,6 +235,7 @@ pub trait StreamEventParser<E>: Debug + Send + Sync + 'static
 where
     E: StreamEventParsed,
 {
+    fn matcher(&self) -> &RouteMatcher;
     /// Human readable identifier.
     fn name(&self) -> &str {
         std::any::type_name::<Self>()
