@@ -197,7 +197,7 @@ impl<E: StreamEventParsed> StreamEventRoute<E> {
     ) -> Self {
         let route = Self {
             id: Uuid::new_v4().to_string().into(),
-            matcher: parser.matcher().clone(),
+            matcher: parser.matcher(),
             parser: Arc::new(parser),
         };
         route
@@ -235,7 +235,7 @@ pub trait StreamEventParser<E>: Debug + Send + Sync + 'static
 where
     E: StreamEventParsed,
 {
-    fn matcher(&self) -> &RouteMatcher;
+    fn matcher(&self) -> RouteMatcher;
     /// Human readable identifier.
     fn name(&self) -> &str {
         std::any::type_name::<Self>()
