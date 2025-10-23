@@ -44,7 +44,7 @@ fn default_hook_calls_at_once() -> usize {
     128
 }
 
-#[derive(Debug, Clone, Deserialize, Copy)]
+#[derive(Debug, Clone, Deserialize, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum StreamKind {
     Http,

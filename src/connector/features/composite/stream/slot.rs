@@ -51,4 +51,5 @@ impl<E: StreamEventParsed> StreamSlot<E> {
             last_error: self.last_error.clone(),
         }
     }
+
 }
