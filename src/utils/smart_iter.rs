@@ -19,20 +19,24 @@ pub struct SmartIter<'a, T> {
 }
 
 impl<'a, T> SmartIter<'a, T> {
+    /// Creates a new SmartIter from a slice of items
     pub fn new(items: &'a [T]) -> Self {
         Self { items }
     }
 
+    /// Samples a random element from the collection
     pub fn sample(&self) -> Option<&'a T> {
         let mut rng = thread_rng();
         self.items.choose(&mut rng)
     }
 
+    /// Samples k random elements without replacement
     pub fn sample_multiple(&self, k: usize) -> Vec<&'a T> {
         let mut rng = thread_rng();
         self.items.choose_multiple(&mut rng, k).collect()
     }
 
+    /// Returns a randomly shuffled copy of the collection
     pub fn shuffle(&self) -> Vec<&'a T> {
         let mut rng = thread_rng();
         let mut items: Vec<&T> = self.items.iter().collect();
@@ -40,6 +44,7 @@ impl<'a, T> SmartIter<'a, T> {
         items
     }
 
+    /// Returns a random element index
     pub fn sample_index(&self) -> Option<usize> {
         if self.items.is_empty() {
             None
@@ -49,11 +54,13 @@ impl<'a, T> SmartIter<'a, T> {
         }
     }
 
+    /// Samples k random indices without replacement
     pub fn sample_indices(&self, k: usize) -> Vec<usize> {
         let mut rng = thread_rng();
         rand::seq::index::sample(&mut rng, self.items.len(), k).into_vec()
     }
 
+    /// Samples one random element that satisfies the predicate
     pub fn sample_one_filtered<F>(&self, pred: F) -> Option<&'a T>
     where
         F: Fn(&T) -> bool,
@@ -65,6 +72,7 @@ impl<'a, T> SmartIter<'a, T> {
             .choose(&mut rng)
     }
 
+    /// Samples k random elements that satisfy the predicate
     pub fn sample_k_filtered<F>(&self, k: usize, pred: F) -> Vec<&'a T>
     where
         F: Fn(&T) -> bool,
@@ -76,6 +84,8 @@ impl<'a, T> SmartIter<'a, T> {
             .choose_multiple(&mut rng, k)
     }
 
+    /// Weighted sampling of one element from filtered items.
+    /// Items with higher weights have higher probability of selection.
     pub fn weighted_sample_filtered<Fp, Fw>(&self, pass: Fp, weight_fn: Fw) -> Option<&'a T>
     where
         Fp: Fn(&T) -> bool,
@@ -96,6 +106,49 @@ impl<'a, T> SmartIter<'a, T> {
         Some(cand[dist.sample(&mut rng)])
     }
 
+    /// Weighted sampling of k elements from filtered items (without replacement).
+    /// Items with higher weights have higher probability of selection.
+    pub fn weighted_sample_k_filtered<Fp, Fw>(
+        &self,
+        k: usize,
+        pass: Fp,
+        weight_fn: Fw,
+    ) -> Vec<&'a T>
+    where
+        Fp: Fn(&T) -> bool,
+        Fw: Fn(&T) -> f64,
+    {
+        let mut cand: Vec<(&T, f64)> = self
+            .items
+            .iter()
+            .filter(|item| pass(item))
+            .map(|item| (item, weight_fn(item)))
+            .collect();
+
+        if cand.is_empty() || cand.iter().all(|(_, w)| *w <= 0.0) {
+            return Vec::new();
+        }
+
+        let mut rng = thread_rng();
+        let mut result = Vec::with_capacity(k.min(cand.len()));
+
+        for _ in 0..k.min(cand.len()) {
+            let weights: Vec<f64> = cand.iter().map(|(_, w)| *w).collect();
+            let dist = match WeightedIndex::new(&weights) {
+                Ok(d) => d,
+                Err(_) => break,
+            };
+
+            let idx = dist.sample(&mut rng);
+            result.push(cand[idx].0);
+            cand.remove(idx);
+        }
+
+        result
+    }
+
+    /// Weighted sampling of one element.
+    /// Items with higher weights have higher probability of selection.
     pub fn weighted_sample<Fw>(&self, weight_fn: Fw) -> Option<&'a T>
     where
         Fw: Fn(&T) -> f64,
@@ -114,6 +167,8 @@ impl<'a, T> SmartIter<'a, T> {
         Some(&self.items[dist.sample(&mut rng)])
     }
 
+    /// Weighted sampling of k elements (with replacement).
+    /// Items with higher weights have higher probability of selection.
     pub fn weighted_sample_multiple<Fw>(&self, k: usize, weight_fn: Fw) -> Vec<&'a T>
     where
         Fw: Fn(&T) -> f64,
@@ -127,6 +182,8 @@ impl<'a, T> SmartIter<'a, T> {
         result
     }
 
+ 
+    /// Partitions the collection into two: items satisfying the predicate and those that don't
     pub fn partition<F>(&self, pred: F) -> (Vec<&'a T>, Vec<&'a T>)
     where
         F: Fn(&T) -> bool,
@@ -134,6 +191,7 @@ impl<'a, T> SmartIter<'a, T> {
         self.items.iter().partition(|&item| pred(item))
     }
 
+    /// Finds the first element that satisfies the predicate
     pub fn find<F>(&self, pred: F) -> Option<&'a T>
     where
         F: Fn(&T) -> bool,
@@ -141,6 +199,7 @@ impl<'a, T> SmartIter<'a, T> {
         self.items.iter().find(|&item| pred(item))
     }
 
+    /// Filters the collection by predicate
     pub fn filter<F>(&self, pred: F) -> Vec<&'a T>
     where
         F: Fn(&T) -> bool,
@@ -148,6 +207,7 @@ impl<'a, T> SmartIter<'a, T> {
         self.items.iter().filter(|&item| pred(item)).collect()
     }
 
+    /// Counts elements that satisfy the predicate
     pub fn count_if<F>(&self, pred: F) -> usize
     where
         F: Fn(&T) -> bool,
@@ -155,6 +215,7 @@ impl<'a, T> SmartIter<'a, T> {
         self.items.iter().filter(|&item| pred(item)).count()
     }
 
+    /// Checks if at least one element satisfies the predicate
     pub fn any<F>(&self, pred: F) -> bool
     where
         F: Fn(&T) -> bool,
@@ -162,6 +223,7 @@ impl<'a, T> SmartIter<'a, T> {
         self.items.iter().any(|item| pred(item))
     }
 
+    /// Checks if all elements satisfy the predicate
     pub fn all<F>(&self, pred: F) -> bool
     where
         F: Fn(&T) -> bool,
@@ -169,6 +231,7 @@ impl<'a, T> SmartIter<'a, T> {
         self.items.iter().all(|item| pred(item))
     }
 
+    /// Samples a random element with given probability
     pub fn sample_with_probability(&self, probability: f64) -> Option<&'a T> {
         let mut rng = thread_rng();
         if rng.r#gen::<f64>() < probability {
@@ -178,7 +241,7 @@ impl<'a, T> SmartIter<'a, T> {
         }
     }
 
-    /// Выбрать K элементов, каждый с вероятностью p (Bernoulli sampling)
+    /// Samples elements, each with probability p (Bernoulli sampling)
     pub fn bernoulli_sample(&self, probability: f64) -> Vec<&'a T> {
         let mut rng = thread_rng();
         self.items
@@ -192,12 +255,14 @@ impl<'a, T> SmartIter<'a, T>
 where
     T: PartialOrd + Copy,
 {
+    /// Returns the k largest elements
     pub fn top_k(&self, k: usize) -> Vec<&'a T> {
         let mut sorted: Vec<&T> = self.items.iter().collect();
         sorted.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
         sorted.into_iter().take(k).collect()
     }
 
+    /// Returns the k smallest elements
     pub fn bottom_k(&self, k: usize) -> Vec<&'a T> {
         let mut sorted: Vec<&T> = self.items.iter().collect();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -209,10 +274,12 @@ impl<'a, T> SmartIter<'a, T>
 where
     T: PartialOrd + Copy + Ord,
 {
+    /// Returns the minimum element
     pub fn min(&self) -> Option<&'a T> {
         self.items.iter().min()
     }
 
+    /// Returns the maximum element
     pub fn max(&self) -> Option<&'a T> {
         self.items.iter().max()
     }
@@ -222,7 +289,7 @@ impl<'a, T> SmartIter<'a, T>
 where
     T: Add<Output = T> + Copy + Default,
 {
-    /// Сумма всех элементов
+    /// Sum of all elements
     pub fn sum(&self) -> T {
         self.items
             .iter()
@@ -235,7 +302,7 @@ impl<'a, T> SmartIter<'a, T>
 where
     T: Add<Output = T> + Div<Output = T> + Copy + Default + From<usize>,
 {
-    /// Среднее значение
+    /// Mean (average) value
     pub fn mean(&self) -> Option<T> {
         if self.items.is_empty() {
             None
@@ -247,6 +314,7 @@ where
 }
 
 impl SmartIter<'_, f64> {
+    /// Sum of all elements with given precision (rounds after each addition)
     pub fn sum_with_precision(&self, precision: i32) -> f64 {
         self.items
             .iter()
@@ -254,6 +322,7 @@ impl SmartIter<'_, f64> {
             .fold(0.0, |acc, x| round_f64(acc + x, precision))
     }
 
+    /// Computes mean and standard deviation
     pub fn mean_std(&self) -> Option<(f64, f64)> {
         if self.items.is_empty() {
             return None;
@@ -266,6 +335,7 @@ impl SmartIter<'_, f64> {
         Some((mean, variance.sqrt()))
     }
 
+    /// Computes the median (50th percentile)
     pub fn median(&self) -> Option<f64> {
         if self.items.is_empty() {
             return None;
@@ -282,6 +352,7 @@ impl SmartIter<'_, f64> {
         }
     }
 
+    /// Computes the quantile of order q (q from 0.0 to 1.0)
     pub fn quantile(&self, q: f64) -> Option<f64> {
         if self.items.is_empty() || q < 0.0 || q > 1.0 {
             return None;
@@ -296,6 +367,7 @@ impl SmartIter<'_, f64> {
 }
 
 impl<'a, T> SmartIter<'a, T> {
+    /// Groups elements by key computed with key_fn
     pub fn group_by<K, F>(&self, key_fn: F) -> HashMap<K, Vec<&'a T>>
     where
         K: Eq + Hash,
@@ -309,6 +381,7 @@ impl<'a, T> SmartIter<'a, T> {
         groups
     }
 
+    /// Returns a sorted copy of the collection
     pub fn sorted(&self) -> Vec<&'a T>
     where
         T: Ord,
@@ -318,6 +391,7 @@ impl<'a, T> SmartIter<'a, T> {
         sorted
     }
 
+    /// Returns a sorted copy using the given comparison function
     pub fn sorted_by<F>(&self, compare: F) -> Vec<&'a T>
     where
         F: FnMut(&&T, &&T) -> std::cmp::Ordering,
@@ -327,6 +401,7 @@ impl<'a, T> SmartIter<'a, T> {
         sorted
     }
 
+    /// Returns a sorted copy by key
     pub fn sorted_by_key<K, F>(&self, key_fn: F) -> Vec<&'a T>
     where
         K: Ord,
@@ -337,6 +412,7 @@ impl<'a, T> SmartIter<'a, T> {
         sorted
     }
 
+    /// Returns unique elements (order not guaranteed)
     pub fn unique(&self) -> Vec<&'a T>
     where
         T: Eq + Hash,
@@ -349,6 +425,7 @@ impl<'a, T> SmartIter<'a, T> {
             .collect()
     }
 
+    /// Removes consecutive duplicates
     pub fn dedup(&self) -> Vec<&'a T>
     where
         T: PartialEq,
@@ -368,55 +445,57 @@ impl<'a, T> SmartIter<'a, T> {
 }
 
 impl<'a, T> SmartIter<'a, T> {
-    /// Количество элементов
+    /// Number of elements
     pub fn len(&self) -> usize {
         self.items.len()
     }
 
-    /// Пустая ли коллекция
+    /// Checks if the collection is empty
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
 
-    /// Получить все элементы
+    /// Get all elements
     pub fn items(&self) -> &[T] {
         self.items
     }
 
-    /// Итератор по элементам
+    /// Iterator over elements
     pub fn iter(&self) -> impl Iterator<Item = &'a T> {
         self.items.iter()
     }
+
+    /// Chains two iterators into one
     pub fn chain<'b>(&'b self, other: &'b SmartIter<'a, T>) -> impl Iterator<Item = &'a T> + 'b {
         self.items.iter().chain(other.items.iter())
     }
 
-    /// Zip с другой коллекцией
+    /// Zip with another collection
     pub fn zip<U>(&'a self, other: &'a [U]) -> impl Iterator<Item = (&'a T, &'a U)> {
         self.items.iter().zip(other.iter())
     }
 
-    /// Enumerate: с индексами
+    /// Enumerate: with indices
     pub fn enumerate(&self) -> impl Iterator<Item = (usize, &T)> {
         self.items.iter().enumerate()
     }
 
-    /// Take: первые N элементов
+    /// Take: first N elements
     pub fn take(&self, n: usize) -> Vec<&'a T> {
         self.items.iter().take(n).collect()
     }
 
-    /// Skip: пропустить первые N
+    /// Skip: skip first N elements
     pub fn skip(&self, n: usize) -> Vec<&'a T> {
         self.items.iter().skip(n).collect()
     }
 
-    /// Chunks: разбить на куски
+    /// Chunks: split into chunks
     pub fn chunks(&self, size: usize) -> impl Iterator<Item = &[T]> {
         self.items.chunks(size)
     }
 
-    /// Windows: скользящее окно
+    /// Windows: sliding window
     pub fn windows(&self, size: usize) -> impl Iterator<Item = &[T]> {
         self.items.windows(size)
     }
@@ -441,6 +520,7 @@ impl<'a, 'b, T> IntoIterator for &'b SmartIter<'a, T> {
 }
 
 impl<'a, T> SmartIter<'a, T> {
+    /// Collects elements into an arbitrary collection
     pub fn collect<B>(&self) -> B
     where
         B: FromIterator<&'a T>,
@@ -448,6 +528,7 @@ impl<'a, T> SmartIter<'a, T> {
         self.items.iter().collect()
     }
 
+    /// Clones elements into a vector
     pub fn to_vec(&self) -> Vec<T>
     where
         T: Clone,
@@ -455,6 +536,7 @@ impl<'a, T> SmartIter<'a, T> {
         self.items.to_vec()
     }
 
+    /// Collects elements into a HashSet
     pub fn to_set(&self) -> std::collections::HashSet<&'a T>
     where
         T: Eq + Hash,
@@ -462,10 +544,12 @@ impl<'a, T> SmartIter<'a, T> {
         self.items.iter().collect()
     }
 
+    /// Selects elements by indices
     pub fn select(&self, indices: &[usize]) -> Vec<&'a T> {
         indices.iter().filter_map(|&i| self.items.get(i)).collect()
     }
 
+    /// Extracts values from elements using a function
     pub fn pluck<U, F>(&self, f: F) -> Vec<U>
     where
         F: Fn(&T) -> U,
