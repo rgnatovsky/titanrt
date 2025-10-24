@@ -7,6 +7,7 @@ use crate::connector::features::grpc::stream::event::{GrpcEvent, GrpcEventKind};
 use crate::connector::features::grpc::stream::utils::{
     ActiveStream, StreamContext, StreamLifecycle, emit_event,
 };
+use crate::utils::CancelToken;
 
 use bytes::Bytes;
 use crossbeam::channel::Sender;
@@ -35,6 +36,7 @@ pub fn start_server_stream(
     max_dec_size: Option<usize>,
     max_enc_size: Option<usize>,
     local: &LocalSet,
+    cancel_token: CancelToken
 ) -> ActiveStream {
     let GrpcStreamConnect {
         mode: _,
@@ -119,29 +121,38 @@ pub fn start_server_stream(
         match response {
             Ok(resp) => {
                 let mut inbound = resp.into_inner();
-                while let Some(item) = inbound.next().await {
-                    match item {
-                        Ok(bytes) => {
-                            emit_event(
-                                &res_tx,
-                                Some(conn_id),
-                                req_id,
-                                label.clone(),
-                                payload.as_ref(),
-                                GrpcEvent::from_ok_stream_item(bytes),
-                            );
-                        }
-                        Err(status) => {
-                            emit_event(
-                                &res_tx,
-                                Some(conn_id),
-                                req_id,
-                                label.clone(),
-                                payload.as_ref(),
-                                GrpcEvent::from_status(GrpcEventKind::StreamItem, status),
-                            );
-                            break;
-                        }
+
+                loop {
+                    if cancel_token.is_cancelled() {
+                        break;
+                    }
+
+                    match tokio::time::timeout(Duration::from_secs(1), inbound.next()).await {
+                        Ok(Some(item)) => match item {
+                            Ok(bytes) => {
+                                emit_event(
+                                    &res_tx,
+                                    Some(conn_id),
+                                    req_id,
+                                    label.clone(),
+                                    payload.as_ref(),
+                                    GrpcEvent::from_ok_stream_item(bytes),
+                                );
+                            }
+                            Err(status) => {
+                                emit_event(
+                                    &res_tx,
+                                    Some(conn_id),
+                                    req_id,
+                                    label.clone(),
+                                    payload.as_ref(),
+                                    GrpcEvent::from_status(GrpcEventKind::StreamItem, status),
+                                );
+                                break;
+                            }
+                        },
+                        Ok(None) => break,
+                        Err(_) => continue,
                     }
                 }
 

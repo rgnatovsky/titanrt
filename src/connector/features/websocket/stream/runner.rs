@@ -46,7 +46,10 @@ use crate::utils::{CancelToken, Reducer, StateMarker};
 
 struct ConnectionHandle {
     cmd_tx: UnboundedSender<WsTaskCommand>,
+    client_id: usize,
 }
+
+type ConnectionMap = AHashMap<String, ConnectionHandle>;
 
 #[derive(Debug)]
 enum WsTaskCommand {
@@ -103,7 +106,7 @@ where
     {
         let mut hook = hook.into_hook();
         let wait_async_tasks = Duration::from_micros(ctx.desc.wait_async_tasks_us);
-        let mut connections: AHashMap<usize, ConnectionHandle> = AHashMap::new();
+        let mut connections: ConnectionMap = AHashMap::new();
         let (res_tx, res_rx) = unbounded::<StreamEventRaw<WebSocketEvent>>();
 
         let rl_manager = Rc::new(Mutex::new(RateLimitManager::new(
@@ -136,50 +139,71 @@ where
 
                 let requested_conn_id = action.conn_id();
                 let req_id = action.req_id();
-                let label = action.label_take();
+                let mut label = action.label_take();
                 let payload = action.json_take();
 
-                let Some(conn_id) = resolve_conn_id(requested_conn_id, &ctx.cfg) else {
-                    push_event(
-                        &res_tx,
-                        requested_conn_id.unwrap_or_default(),
-                        req_id,
-                        label.as_ref(),
-                        payload.as_ref(),
-                        WebSocketEvent::error("unknown connection id"),
-                    );
-                    continue;
+                let label_key = match label.take() {
+                    Some(l) => l.into_owned(),
+                    None => {
+                        push_event(
+                            &res_tx,
+                            0,
+                            req_id,
+                            None,
+                            payload.as_ref(),
+                            WebSocketEvent::error("ws action requires label"),
+                        );
+                        continue;
+                    }
                 };
+
+                let label_for_err = Cow::Owned(label_key.clone());
 
                 match command {
                     WebSocketCommand::Connect(connect_cfg) => {
-                        let Some(client) = ctx.cfg.get(&conn_id) else {
+                        let Some(conn_id) = select_client_id(requested_conn_id, &ctx.cfg) else {
                             push_event(
                                 &res_tx,
-                                conn_id,
+                                0,
                                 req_id,
-                                label.as_ref(),
+                                Some(&label_for_err),
                                 payload.as_ref(),
                                 WebSocketEvent::error("client spec not found"),
                             );
                             continue;
                         };
 
-                        let client_cfg = client.as_ref().clone();
+                        let Some(client) = ctx.cfg.get(&conn_id) else {
+                            push_event(
+                                &res_tx,
+                                conn_id,
+                                req_id,
+                                Some(&label_for_err),
+                                payload.as_ref(),
+                                WebSocketEvent::error("client spec not found"),
+                            );
+                            continue;
+                        };
 
-                        if let Some(handle) = connections.remove(&conn_id) {
-                            let _ = handle.cmd_tx.send(WsTaskCommand::Disconnect);
+                        {
+                            if let Some(existing) = connections.remove(&label_key) {
+                                let _ = existing.cmd_tx.send(WsTaskCommand::Disconnect);
+                            }
                         }
 
                         let (cmd_tx, cmd_rx) = unbounded_channel();
                         let session_res_tx = res_tx.clone();
                         let cancel = ctx.cancel.clone();
-                        let label_clone = label.clone();
+                        let req_id_local = req_id;
+                        let label_string_for_spawn = label_key.clone();
                         let payload_clone = payload.clone();
+                        let client_cfg = client.as_ref().clone();
 
                         local.spawn_local(async move {
-                            let run_label = label_clone.clone();
+                            let run_label: Option<Cow<'static, str>> =
+                                Some(Cow::Owned(label_string_for_spawn.clone()));
                             let run_payload = payload_clone.clone();
+
                             if let Err(err) = run_session(
                                 conn_id,
                                 client_cfg,
@@ -187,231 +211,270 @@ where
                                 cmd_rx,
                                 session_res_tx.clone(),
                                 cancel,
-                                req_id,
+                                req_id_local,
                                 run_label,
                                 run_payload,
                             )
                             .await
                             {
+                                let label_cow = Cow::Owned(label_string_for_spawn);
                                 push_event(
                                     &session_res_tx,
                                     conn_id,
                                     None,
-                                    label_clone.as_ref(),
+                                    Some(&label_cow),
                                     payload_clone.as_ref(),
                                     WebSocketEvent::error(format!("session error: {err}")),
                                 );
                             }
                         });
 
-                        connections.insert(conn_id, ConnectionHandle { cmd_tx });
-                    }
-                    WebSocketCommand::Send(message) => match connections.get(&conn_id) {
-                        Some(handle) => {
-                            let cmd_tx = handle.cmd_tx.clone();
-                            let rl_manager_clone = if action.rl_ctx().is_some() {
-                                Some(rl_manager.clone())
-                            } else {
-                                None
-                            };
-                            let rl_ctx = action.rl_ctx().cloned();
-                            let rl_weight = action.rl_weight();
-                            let res_tx_clone = res_tx.clone();
-                            let label_clone = label.clone();
-                            let payload_clone = payload.clone();
-
-                            local.spawn_local(async move {
-                                if let Some(rl_mgr) = rl_manager_clone {
-                                    if let Some(ctx) = rl_ctx.as_ref() {
-                                        let plan = {
-                                            let mut mgr = rl_mgr.lock().await;
-                                            mgr.plan(ctx, rl_weight)
-                                        };
-                                        if let Some(plan) = plan {
-                                            for (bucket, weight) in plan {
-                                                bucket.wait(weight).await;
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if cmd_tx.send(WsTaskCommand::Send(message)).is_err() {
-                                    push_event(
-                                        &res_tx_clone,
-                                        conn_id,
-                                        req_id,
-                                        label_clone.as_ref(),
-                                        payload_clone.as_ref(),
-                                        WebSocketEvent::error("connection is not available"),
-                                    );
-                                }
-                            });
-                        }
-                        None => push_event(
-                            &res_tx,
-                            conn_id,
-                            req_id,
-                            label.as_ref(),
-                            payload.as_ref(),
-                            WebSocketEvent::error("connection is not established"),
-                        ),
-                    },
-                    WebSocketCommand::Ping(bytes) => {
-                        if let Some(handle) = connections.get(&conn_id) {
-                            let cmd_tx = handle.cmd_tx.clone();
-                            let rl_manager_clone = if action.rl_ctx().is_some() {
-                                Some(rl_manager.clone())
-                            } else {
-                                None
-                            };
-                            let rl_ctx = action.rl_ctx().cloned();
-                            let rl_weight = action.rl_weight();
-                            let res_tx_clone = res_tx.clone();
-                            let label_clone = label.clone();
-                            let payload_clone = payload.clone();
-
-                            local.spawn_local(async move {
-                                if let Some(rl_mgr) = rl_manager_clone {
-                                    if let Some(ctx) = rl_ctx.as_ref() {
-                                        let plan = {
-                                            let mut mgr = rl_mgr.lock().await;
-                                            mgr.plan(ctx, rl_weight)
-                                        };
-                                        if let Some(plan) = plan {
-                                            for (bucket, weight) in plan {
-                                                bucket.wait(weight).await;
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if cmd_tx.send(WsTaskCommand::Ping(bytes)).is_err() {
-                                    push_event(
-                                        &res_tx_clone,
-                                        conn_id,
-                                        req_id,
-                                        label_clone.as_ref(),
-                                        payload_clone.as_ref(),
-                                        WebSocketEvent::error("connection is not available"),
-                                    );
-                                }
-                            });
-                        } else {
-                            push_event(
-                                &res_tx,
-                                conn_id,
-                                req_id,
-                                label.as_ref(),
-                                payload.as_ref(),
-                                WebSocketEvent::error("connection is not established"),
+                        {
+                            connections.insert(
+                                label_key.clone(),
+                                ConnectionHandle {
+                                    cmd_tx,
+                                    client_id: conn_id,
+                                },
                             );
                         }
+                    }
+                    WebSocketCommand::Send(message) => {
+                        let (cmd_tx, client_id) = {
+                            match connections.get(&label_key) {
+                                Some(handle) => (handle.cmd_tx.clone(), handle.client_id),
+                                None => {
+                                    push_event(
+                                        &res_tx,
+                                        requested_conn_id.unwrap_or(0),
+                                        req_id,
+                                        Some(&label_for_err),
+                                        payload.as_ref(),
+                                        WebSocketEvent::error("connection is not established"),
+                                    );
+                                    continue;
+                                }
+                            }
+                        };
+
+                        let rl_manager_clone = if action.rl_ctx().is_some() {
+                            Some(rl_manager.clone())
+                        } else {
+                            None
+                        };
+                        let rl_ctx = action.rl_ctx().cloned();
+                        let rl_weight = action.rl_weight();
+                        let res_tx_clone = res_tx.clone();
+                        let label_string_for_spawn = label_key.clone();
+                        let payload_clone = payload.clone();
+
+                        local.spawn_local(async move {
+                            if let Some(rl_mgr) = rl_manager_clone {
+                                if let Some(ctx) = rl_ctx.as_ref() {
+                                    if let Some(plan) = {
+                                        let mut mgr = rl_mgr.lock().await;
+                                        mgr.plan(ctx, rl_weight)
+                                    } {
+                                        for (bucket, weight) in plan {
+                                            bucket.wait(weight).await;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if cmd_tx.send(WsTaskCommand::Send(message)).is_err() {
+                                let label_cow = Cow::Owned(label_string_for_spawn);
+                                push_event(
+                                    &res_tx_clone,
+                                    client_id,
+                                    req_id,
+                                    Some(&label_cow),
+                                    payload_clone.as_ref(),
+                                    WebSocketEvent::error("connection is not available"),
+                                );
+                            }
+                        });
+                    }
+                    WebSocketCommand::Ping(bytes) => {
+                        let (cmd_tx, client_id) = {
+                            match connections.get(&label_key) {
+                                Some(handle) => (handle.cmd_tx.clone(), handle.client_id),
+                                None => {
+                                    push_event(
+                                        &res_tx,
+                                        requested_conn_id.unwrap_or(0),
+                                        req_id,
+                                        Some(&label_for_err),
+                                        payload.as_ref(),
+                                        WebSocketEvent::error("connection is not established"),
+                                    );
+                                    continue;
+                                }
+                            }
+                        };
+
+                        let rl_manager_clone = if action.rl_ctx().is_some() {
+                            Some(rl_manager.clone())
+                        } else {
+                            None
+                        };
+                        let rl_ctx = action.rl_ctx().cloned();
+                        let rl_weight = action.rl_weight();
+                        let res_tx_clone = res_tx.clone();
+                        let label_string_for_spawn = label_key.clone();
+                        let payload_clone = payload.clone();
+
+                        local.spawn_local(async move {
+                            if let Some(rl_mgr) = rl_manager_clone {
+                                if let Some(ctx) = rl_ctx.as_ref() {
+                                    if let Some(plan) = {
+                                        let mut mgr = rl_mgr.lock().await;
+                                        mgr.plan(ctx, rl_weight)
+                                    } {
+                                        for (bucket, weight) in plan {
+                                            bucket.wait(weight).await;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if cmd_tx.send(WsTaskCommand::Ping(bytes)).is_err() {
+                                let label_cow = Cow::Owned(label_string_for_spawn);
+                                push_event(
+                                    &res_tx_clone,
+                                    client_id,
+                                    req_id,
+                                    Some(&label_cow),
+                                    payload_clone.as_ref(),
+                                    WebSocketEvent::error("connection is not available"),
+                                );
+                            }
+                        });
                     }
                     WebSocketCommand::Pong(bytes) => {
-                        if let Some(handle) = connections.get(&conn_id) {
-                            let cmd_tx = handle.cmd_tx.clone();
-                            let rl_manager_clone = if action.rl_ctx().is_some() {
-                                Some(rl_manager.clone())
-                            } else {
-                                None
-                            };
-                            let rl_ctx = action.rl_ctx().cloned();
-                            let rl_weight = action.rl_weight();
-                            let res_tx_clone = res_tx.clone();
-                            let label_clone = label.clone();
-                            let payload_clone = payload.clone();
+                        let (cmd_tx, client_id) = {
+                            match connections.get(&label_key) {
+                                Some(handle) => (handle.cmd_tx.clone(), handle.client_id),
+                                None => {
+                                    push_event(
+                                        &res_tx,
+                                        requested_conn_id.unwrap_or(0),
+                                        req_id,
+                                        Some(&label_for_err),
+                                        payload.as_ref(),
+                                        WebSocketEvent::error("connection is not established"),
+                                    );
+                                    continue;
+                                }
+                            }
+                        };
 
-                            local.spawn_local(async move {
-                                if let Some(rl_mgr) = rl_manager_clone {
-                                    if let Some(ctx) = rl_ctx.as_ref() {
-                                        let plan = {
-                                            let mut mgr = rl_mgr.lock().await;
-                                            mgr.plan(ctx, rl_weight)
-                                        };
-                                        if let Some(plan) = plan {
-                                            for (bucket, weight) in plan {
-                                                bucket.wait(weight).await;
-                                            }
+                        let rl_manager_clone = if action.rl_ctx().is_some() {
+                            Some(rl_manager.clone())
+                        } else {
+                            None
+                        };
+                        let rl_ctx = action.rl_ctx().cloned();
+                        let rl_weight = action.rl_weight();
+                        let res_tx_clone = res_tx.clone();
+                        let label_string_for_spawn = label_key.clone();
+                        let payload_clone = payload.clone();
+
+                        local.spawn_local(async move {
+                            if let Some(rl_mgr) = rl_manager_clone {
+                                if let Some(ctx) = rl_ctx.as_ref() {
+                                    if let Some(plan) = {
+                                        let mut mgr = rl_mgr.lock().await;
+                                        mgr.plan(ctx, rl_weight)
+                                    } {
+                                        for (bucket, weight) in plan {
+                                            bucket.wait(weight).await;
                                         }
                                     }
                                 }
+                            }
 
-                                if cmd_tx.send(WsTaskCommand::Pong(bytes)).is_err() {
-                                    push_event(
-                                        &res_tx_clone,
-                                        conn_id,
-                                        req_id,
-                                        label_clone.as_ref(),
-                                        payload_clone.as_ref(),
-                                        WebSocketEvent::error("connection is not available"),
-                                    );
-                                }
-                            });
-                        } else {
-                            push_event(
-                                &res_tx,
-                                conn_id,
-                                req_id,
-                                label.as_ref(),
-                                payload.as_ref(),
-                                WebSocketEvent::error("connection is not established"),
-                            );
-                        }
+                            if cmd_tx.send(WsTaskCommand::Pong(bytes)).is_err() {
+                                let label_cow = Cow::Owned(label_string_for_spawn);
+                                push_event(
+                                    &res_tx_clone,
+                                    client_id,
+                                    req_id,
+                                    Some(&label_cow),
+                                    payload_clone.as_ref(),
+                                    WebSocketEvent::error("connection is not available"),
+                                );
+                            }
+                        });
                     }
                     WebSocketCommand::Close(close_cfg) => {
-                        if let Some(handle) = connections.get(&conn_id) {
-                            let cmd_tx = handle.cmd_tx.clone();
-                            let rl_manager_clone = if action.rl_ctx().is_some() {
-                                Some(rl_manager.clone())
-                            } else {
-                                None
-                            };
-                            let rl_ctx = action.rl_ctx().cloned();
-                            let rl_weight = action.rl_weight();
-                            let res_tx_clone = res_tx.clone();
-                            let label_clone = label.clone();
-                            let payload_clone = payload.clone();
+                        let (cmd_tx, client_id) = {
+                            match connections.get(&label_key) {
+                                Some(handle) => (handle.cmd_tx.clone(), handle.client_id),
+                                None => {
+                                    push_event(
+                                        &res_tx,
+                                        requested_conn_id.unwrap_or(0),
+                                        req_id,
+                                        Some(&label_for_err),
+                                        payload.as_ref(),
+                                        WebSocketEvent::error("connection is not established"),
+                                    );
+                                    continue;
+                                }
+                            }
+                        };
 
-                            local.spawn_local(async move {
-                                if let Some(rl_mgr) = rl_manager_clone {
-                                    if let Some(ctx) = rl_ctx.as_ref() {
-                                        let plan = {
-                                            let mut mgr = rl_mgr.lock().await;
-                                            mgr.plan(ctx, rl_weight)
-                                        };
-                                        if let Some(plan) = plan {
-                                            for (bucket, weight) in plan {
-                                                bucket.wait(weight).await;
-                                            }
+                        let rl_manager_clone = if action.rl_ctx().is_some() {
+                            Some(rl_manager.clone())
+                        } else {
+                            None
+                        };
+                        let rl_ctx = action.rl_ctx().cloned();
+                        let rl_weight = action.rl_weight();
+                        let res_tx_clone = res_tx.clone();
+                        let label_string_for_spawn = label_key.clone();
+                        let payload_clone = payload.clone();
+
+                        local.spawn_local(async move {
+                            if let Some(rl_mgr) = rl_manager_clone {
+                                if let Some(ctx) = rl_ctx.as_ref() {
+                                    if let Some(plan) = {
+                                        let mut mgr = rl_mgr.lock().await;
+                                        mgr.plan(ctx, rl_weight)
+                                    } {
+                                        for (bucket, weight) in plan {
+                                            bucket.wait(weight).await;
                                         }
                                     }
                                 }
+                            }
 
-                                if cmd_tx.send(WsTaskCommand::Close(close_cfg)).is_err() {
-                                    push_event(
-                                        &res_tx_clone,
-                                        conn_id,
-                                        req_id,
-                                        label_clone.as_ref(),
-                                        payload_clone.as_ref(),
-                                        WebSocketEvent::error("connection is not available"),
-                                    );
-                                }
-                            });
+                            if cmd_tx.send(WsTaskCommand::Close(close_cfg)).is_err() {
+                                let label_cow = Cow::Owned(label_string_for_spawn);
+                                push_event(
+                                    &res_tx_clone,
+                                    client_id,
+                                    req_id,
+                                    Some(&label_cow),
+                                    payload_clone.as_ref(),
+                                    WebSocketEvent::error("connection is not available"),
+                                );
+                            }
+                        });
+                    }
+                    WebSocketCommand::Disconnect => {
+                        if let Some(handle) = connections.remove(&label_key) {
+                            let _ = handle.cmd_tx.send(WsTaskCommand::Disconnect);
                         } else {
                             push_event(
                                 &res_tx,
-                                conn_id,
+                                0,
                                 req_id,
-                                label.as_ref(),
+                                Some(&label_for_err),
                                 payload.as_ref(),
                                 WebSocketEvent::error("connection is not established"),
                             );
-                        }
-                    }
-                    WebSocketCommand::Disconnect => {
-                        if let Some(handle) = connections.remove(&conn_id) {
-                            let _ = handle.cmd_tx.send(WsTaskCommand::Disconnect);
                         }
                     }
                 }
@@ -423,7 +486,7 @@ where
                     Ok(event) => {
                         budget -= 1;
                         let remove_after = matches!(event.inner(), WebSocketEvent::Closed { .. });
-                        let conn_id = event.conn_id();
+                        let label = event.label().map(|l| l.to_string());
                         hook.call(HookArgs::new(
                             event,
                             &mut ctx.event_tx,
@@ -433,8 +496,8 @@ where
                             &ctx.health,
                         ));
                         if remove_after {
-                            if let Some(id) = conn_id {
-                                connections.remove(&id);
+                            if let Some(label_key) = label {
+                                connections.remove(&label_key);
                             }
                         }
                     }
@@ -453,18 +516,13 @@ where
     }
 }
 
-fn resolve_conn_id(
+fn select_client_id(
     explicit: Option<usize>,
     cfg: &ClientsMap<WebSocketClient, WebSocketClientSpec>,
 ) -> Option<usize> {
-    if let Some(id) = explicit {
-        if cfg.contains(&id) {
-            return Some(id);
-        }
-        return None;
-    }
-
-    cfg.sole_entry_id()
+    explicit
+        .filter(|id| cfg.contains(id))
+        .or_else(|| cfg.sole_entry_id())
 }
 
 fn push_event(

@@ -1,5 +1,3 @@
-use crate::connector::features::shared::events::StreamEventRaw;
-use crate::connector::features::shared::rate_limiter::RateLimitManager;
 use crate::connector::features::grpc::codec::RawCodec;
 use crate::connector::features::grpc::stream::GrpcStreamMode;
 use crate::connector::features::grpc::stream::actions::GrpcStreamConnect;
@@ -7,6 +5,9 @@ use crate::connector::features::grpc::stream::event::{GrpcEvent, GrpcEventKind};
 use crate::connector::features::grpc::stream::utils::{
     ActiveStream, MpscBytesStream, StreamContext, StreamLifecycle, emit_event,
 };
+use crate::connector::features::shared::events::StreamEventRaw;
+use crate::connector::features::shared::rate_limiter::RateLimitManager;
+use crate::utils::CancelToken;
 
 use bytes::Bytes;
 use crossbeam::channel::Sender;
@@ -35,6 +36,7 @@ pub fn start_client_stream(
     max_enc_size: Option<usize>,
     outbound_buffer: usize,
     local: &LocalSet,
+    cancel_token: CancelToken,
 ) -> ActiveStream {
     let GrpcStreamConnect {
         mode: _,
@@ -97,27 +99,46 @@ pub fn start_client_stream(
         let mut request = Request::new(outbound);
         *request.metadata_mut() = metadata.clone();
 
+        let cancel_future = async {
+            while !cancel_token.is_cancelled() {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        };
+        
         let call = grpc.client_streaming(request, method.clone(), RawCodec);
+
         let response = match timeout {
-            Some(t) => match tokio::time::timeout(t, call).await {
-                Ok(res) => res,
-                Err(_) => {
-                    emit_event(
-                        &res_tx,
-                        Some(conn_id),
-                        req_id,
-                        label,
-                        payload.as_ref(),
-                        GrpcEvent::from_status(
-                            GrpcEventKind::StreamConnected,
-                            Status::deadline_exceeded("connect timeout"),
-                        ),
-                    );
+            Some(t) => tokio::select! {
+                res = tokio::time::timeout(t, call) => match res {
+                    Ok(res) => res,
+                    Err(_) => {
+                        emit_event(
+                            &res_tx,
+                            Some(conn_id),
+                            req_id,
+                            label,
+                            payload.as_ref(),
+                            GrpcEvent::from_status(
+                                GrpcEventKind::StreamConnected,
+                                Status::deadline_exceeded("connect timeout"),
+                            ),
+                        );
+                        let _ = lifecycle_tx.send(StreamLifecycle::Closed { stream_name });
+                        return;
+                    }
+                },
+                _ = cancel_future => {
                     let _ = lifecycle_tx.send(StreamLifecycle::Closed { stream_name });
                     return;
                 }
             },
-            None => call.await,
+            None => tokio::select! {
+                res = call => res,
+                _ = cancel_future => {
+                    let _ = lifecycle_tx.send(StreamLifecycle::Closed { stream_name });
+                    return;
+                }
+            },
         };
 
         match response {

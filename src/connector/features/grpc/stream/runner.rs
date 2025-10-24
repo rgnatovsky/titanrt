@@ -182,6 +182,8 @@ where
                                     None
                                 };
 
+                                let cancel_token = ctx.cancel.clone();
+
                                 let active = match connect.mode {
                                     GrpcStreamMode::Server => start_server_stream(
                                         connect,
@@ -198,6 +200,7 @@ where
                                         ctx.desc.max_decoding_message_size,
                                         ctx.desc.max_encoding_message_size,
                                         &local,
+                                        cancel_token,
                                     ),
                                     GrpcStreamMode::Client => start_client_stream(
                                         connect,
@@ -215,6 +218,7 @@ where
                                         ctx.desc.max_encoding_message_size,
                                         ctx.desc.outbound_buffer,
                                         &local,
+                                        cancel_token,
                                     ),
                                     GrpcStreamMode::Bidi => start_bidi_stream(
                                         connect,
@@ -232,6 +236,7 @@ where
                                         ctx.desc.max_encoding_message_size,
                                         ctx.desc.outbound_buffer,
                                         &local,
+                                        cancel_token,
                                     ),
                                 };
 
