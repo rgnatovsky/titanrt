@@ -31,6 +31,7 @@ where
 #[derive(Clone)]
 pub struct ClientsMap<Client: ClientInitializer<Spec>, Spec: Clone> {
     inner: Arc<RwLock<AHashMap<usize, Arc<Client>>>>,
+    default_id: Arc<RwLock<Option<usize>>>,
     init_rt: Option<Arc<Runtime>>,
     _spec: PhantomData<Spec>,
 }
@@ -39,6 +40,7 @@ impl<Client: ClientInitializer<Config>, Config: Clone> ClientsMap<Client, Config
     pub fn new(config: &ClientConfig<Config>, rt: Option<Arc<Runtime>>) -> Result<Self> {
         let map = Self {
             inner: Arc::new(RwLock::new(AHashMap::new())),
+            default_id: Arc::new(RwLock::new(None)),
             init_rt: rt,
             _spec: PhantomData,
         };
@@ -52,6 +54,7 @@ impl<Client: ClientInitializer<Config>, Config: Clone> ClientsMap<Client, Config
     pub fn rebuild(&self, config: &ClientConfig<Config>) -> Result<()> {
         let mut id_seen: HashSet<usize> = HashSet::default();
         let mut prepared: Vec<(usize, Arc<Client>)> = Vec::with_capacity(config.specific.len() + 1);
+        let mut default_slot: Option<usize> = None;
 
         for spec in config.specific.iter() {
             if !id_seen.insert(spec.id) {
@@ -76,7 +79,10 @@ impl<Client: ClientInitializer<Config>, Config: Clone> ClientsMap<Client, Config
             };
             let client = self.init_client(&default_client)?;
             prepared.push((default_id, client));
+            default_slot = Some(default_id);
         }
+
+        *self.default_id.write() = default_slot;
 
         if config.fail_on_empty && prepared.is_empty() {
             return Err(anyhow!("Clients map is empty"));
@@ -111,6 +117,10 @@ impl<Client: ClientInitializer<Config>, Config: Clone> ClientsMap<Client, Config
         self.inner.read().contains_key(id)
     }
 
+    pub fn default_id(&self) -> Option<usize> {
+        *self.default_id.read()
+    }
+
     pub fn ids(&self) -> Vec<usize> {
         self.inner.read().keys().copied().collect()
     }
@@ -124,7 +134,14 @@ impl<Client: ClientInitializer<Config>, Config: Clone> ClientsMap<Client, Config
     }
 
     pub fn remove(&self, id: usize) -> Option<Arc<Client>> {
-        self.inner.write().remove(&id)
+        let removed = self.inner.write().remove(&id);
+        if removed.is_some() {
+            let mut default_guard = self.default_id.write();
+            if default_guard.as_ref() == Some(&id) {
+                *default_guard = None;
+            }
+        }
+        removed
     }
 
     pub fn next_vacant_id(&self) -> usize {

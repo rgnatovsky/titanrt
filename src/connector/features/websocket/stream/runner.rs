@@ -161,7 +161,7 @@ where
 
                 match command {
                     WebSocketCommand::Connect(connect_cfg) => {
-                        let Some(conn_id) = select_client_id(requested_conn_id, &ctx.cfg) else {
+                        let Some(conn_id) = select_conn_id(requested_conn_id, &ctx.cfg) else {
                             push_event(
                                 &res_tx,
                                 0,
@@ -516,12 +516,13 @@ where
     }
 }
 
-fn select_client_id(
+fn select_conn_id(
     explicit: Option<usize>,
     cfg: &ClientsMap<WebSocketClient, WebSocketClientSpec>,
 ) -> Option<usize> {
     explicit
         .filter(|id| cfg.contains(id))
+        .or_else(|| cfg.default_id())
         .or_else(|| cfg.sole_entry_id())
 }
 
