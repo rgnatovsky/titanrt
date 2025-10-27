@@ -35,6 +35,20 @@ impl LoggerConfig {
         }
     }
 
+    pub fn with_info() -> Self {
+        Self {
+            level: "info".to_string(),
+            ..Self::default()
+        }
+    }
+
+    pub fn with_debug() -> Self {
+        Self {
+            level: "debug".to_string(),
+            ..Self::default()
+        }
+    }
+
     pub fn init(&self) -> anyhow::Result<Option<tracing_appender::non_blocking::WorkerGuard>> {
         let level = Level::from_str(&self.level).unwrap_or(Level::INFO);
 
