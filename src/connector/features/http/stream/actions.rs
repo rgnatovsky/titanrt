@@ -5,6 +5,8 @@ use serde::Serialize;
 use serde_json::Value;
 use std::time::Duration;
 
+use crate::connector::features::http::config::HttpRetryConfig;
+
 /// Represents the body of an HTTP request.
 #[derive(Debug, Clone)]
 pub enum ActionBody {
@@ -57,6 +59,7 @@ pub struct HttpAction {
     pub body: ActionBody,
     pub query: Vec<(String, String)>,
     pub headers: HeaderMap,
+    pub retry: Option<HttpRetryConfig>,
 }
 
 impl HttpAction {
@@ -78,6 +81,14 @@ impl HttpAction {
         }
 
         self.body.apply_to(rb)
+    }
+
+    pub(crate) fn build_request(
+        &self,
+        client: &Client,
+        timeout: Option<Duration>,
+    ) -> Result<reqwest::Request, reqwest::Error> {
+        self.clone().to_request_builder(client, timeout).build()
     }
 
     pub fn builder(method: Method, url: Url) -> ReqwestActionBuilder {
@@ -104,6 +115,7 @@ pub struct ReqwestActionBuilder {
     pub body: ActionBody,
     pub query: Vec<(String, String)>,
     pub headers: HeaderMap,
+    pub retry: Option<HttpRetryConfig>,
 }
 
 impl ReqwestActionBuilder {
@@ -115,6 +127,7 @@ impl ReqwestActionBuilder {
             body: ActionBody::Empty,
             query: Vec::new(),
             headers: HeaderMap::new(),
+            retry: None,
         }
     }
 
@@ -210,6 +223,7 @@ impl ReqwestActionBuilder {
             headers: self.headers,
             body: self.body,
             query: self.query,
+            retry: self.retry,
         }
     }
 }

@@ -25,8 +25,9 @@ use crate::utils::{CancelToken, SharedStr, StateCell};
 
 #[cfg(feature = "grpc_conn")]
 use crate::connector::features::grpc::connector::{GrpcConnector, GrpcConnectorConfig};
+use crate::connector::features::http::config::HttpConnectorConfig;
 #[cfg(feature = "http_conn")]
-use crate::connector::features::http::connector::{HttpConnector, HttpConnectorConfig};
+use crate::connector::features::http::connector::HttpConnector;
 #[cfg(feature = "ws_conn")]
 use crate::connector::features::websocket::connector::{
     WebSocketConnector, WebSocketConnectorConfig,

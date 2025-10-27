@@ -1,19 +1,11 @@
 use crate::connector::BaseConnector;
 use crate::connector::features::http::client::{ReqwestClient, ReqwestClientSpec};
-use crate::connector::features::shared::clients_map::{ClientConfig, ClientsMap, SpecificClient};
+use crate::connector::features::http::config::HttpConnectorConfig;
+use crate::connector::features::shared::clients_map::{ClientsMap, SpecificClient};
 use crate::utils::{CancelToken, CoreStats};
-use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
 use std::sync::Arc;
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct HttpConnectorConfig {
-    pub default_max_cores: Option<usize>,
-    pub specific_core_ids: Vec<usize>,
-    pub use_core_stats: bool,
-    pub client: ClientConfig<ReqwestClientSpec>,
-}
 
 pub struct HttpConnector {
     config: HttpConnectorConfig,

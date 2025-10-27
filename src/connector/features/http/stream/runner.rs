@@ -92,31 +92,14 @@ where
                 let Some(client) = action.conn_id().and_then(|id| ctx.cfg.get(&id)) else {
                     continue;
                 };
-                let inner = match action.inner_take() {
+
+                let http_action = match action.inner_take() {
                     Some(inner) => inner,
                     None => continue,
                 };
 
-                let request = match inner
-                    .to_request_builder(&client.as_ref().0, action.timeout())
-                    .build()
-                {
-                    Ok(request) => request,
-                    Err(e) => {
-                        let inner = HttpEvent::from_error(e);
-                        let stream_event = StreamEventRaw::builder(None)
-                            .conn_id(action.conn_id())
-                            .req_id(action.req_id())
-                            .label(action.label_take())
-                            .payload(action.json_take())
-                            .inner(inner)
-                            .build()?;
-
-                        let _ = res_tx.try_send(stream_event);
-                        continue;
-                    }
-                };
-
+                let timeout = action.timeout();
+                let retry_cfg = http_action.retry.clone();
                 let res_tx = res_tx.clone();
 
                 let rl_manager = if action.rl_ctx().is_some() {
@@ -126,22 +109,45 @@ where
                 };
 
                 local.spawn_local(async move {
-                    if let Some(rl_manager) = rl_manager {
-                        let plan = {
-                            let mut mgr = rl_manager.lock().await;
-                            mgr.plan(action.rl_ctx().as_ref().unwrap(), action.rl_weight())
+                    let mut attempt = 0usize;
+                    let max_attempts = retry_cfg.as_ref().map(|cfg| cfg.attempts()).unwrap_or(1);
+
+                    let inner = loop {
+                        let request = match http_action.build_request(&client.as_ref().0, timeout) {
+                            Ok(request) => request,
+                            Err(err) => break HttpEvent::from_error(err),
                         };
 
-                        if let Some(plan) = plan {
-                            for (bucket, weight) in plan {
-                                bucket.wait(weight).await;
+                        if let Some(ref rl_manager) = rl_manager {
+                            let plan = {
+                                let mut mgr = rl_manager.lock().await;
+                                mgr.plan(action.rl_ctx().as_ref().unwrap(), action.rl_weight())
+                            };
+
+                            if let Some(plan) = plan {
+                                for (bucket, weight) in plan {
+                                    bucket.wait(weight).await;
+                                }
                             }
                         }
-                    }
-                    let out = client.as_ref().0.execute(request).await;
-                    let inner = match out {
-                        Ok(resp) => HttpEvent::from_raw(resp).await,
-                        Err(e) => HttpEvent::from_error(e),
+
+                        match client.as_ref().0.execute(request).await {
+                            Ok(resp) => break HttpEvent::from_raw(resp).await,
+                            Err(err) => {
+                                attempt = attempt.saturating_add(1);
+                                if attempt >= max_attempts {
+                                    break HttpEvent::from_error(err);
+                                }
+
+                                if let Some(cfg) = retry_cfg.as_ref() {
+                                    let delay = cfg.delay_for_attempt(attempt);
+                                    if !delay.is_zero() {
+                                        sleep(delay).await;
+                                    }
+                                }
+                                continue;
+                            }
+                        }
                     };
 
                     let stream_event = StreamEventRaw::builder(None)
