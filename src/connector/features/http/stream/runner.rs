@@ -16,7 +16,7 @@ use anyhow::anyhow;
 use crossbeam::channel::unbounded;
 use std::fmt::Debug;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::runtime::Builder;
 use tokio::sync::Mutex;
 use tokio::task::LocalSet;
@@ -111,6 +111,7 @@ where
                 local.spawn_local(async move {
                     let mut attempt = 0usize;
                     let max_attempts = retry_cfg.as_ref().map(|cfg| cfg.attempts()).unwrap_or(1);
+                    let mut total_rl_wait = Duration::default();
 
                     let inner = loop {
                         let request = match http_action.build_request(&client.as_ref().0, timeout) {
@@ -125,9 +126,11 @@ where
                             };
 
                             if let Some(plan) = plan {
+                                let wait_started = Instant::now();
                                 for (bucket, weight) in plan {
                                     bucket.wait(weight).await;
                                 }
+                                total_rl_wait += wait_started.elapsed();
                             }
                         }
 
@@ -148,6 +151,12 @@ where
                                 continue;
                             }
                         }
+                    };
+
+                    let inner = if total_rl_wait.is_zero() {
+                        inner
+                    } else {
+                        inner.with_rate_limit_delay(Some(total_rl_wait))
                     };
 
                     let stream_event = StreamEventRaw::builder(None)

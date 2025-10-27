@@ -2,6 +2,7 @@ use anyhow::{Result, anyhow};
 use bytes::Bytes;
 use reqwest::header::HeaderMap;
 use reqwest::{Response, StatusCode};
+use std::time::Duration;
 
 use crate::connector::features::shared::events::StreamEventInner;
 
@@ -11,6 +12,7 @@ pub struct HttpEvent {
     err_msg: Option<String>,
     headers: HeaderMap,
     body: Option<Bytes>,
+    rate_limit_delay: Option<Duration>,
 }
 
 impl HttpEvent {
@@ -31,6 +33,7 @@ impl HttpEvent {
                     err_msg: Some(e.to_string()),
                     headers,
                     body,
+                    rate_limit_delay: None,
                 };
             }
         };
@@ -51,6 +54,7 @@ impl HttpEvent {
             err_msg,
             headers,
             body,
+            rate_limit_delay: None,
         }
     }
 
@@ -63,7 +67,17 @@ impl HttpEvent {
             headers,
             err_msg: Some(error.to_string()),
             body,
+            rate_limit_delay: None,
         }
+    }
+
+    pub fn with_rate_limit_delay(mut self, delay: Option<Duration>) -> Self {
+        self.rate_limit_delay = delay;
+        self
+    }
+
+    pub fn rate_limit_delay(&self) -> Option<Duration> {
+        self.rate_limit_delay
     }
 
     pub fn status(&self) -> &StatusCode {
