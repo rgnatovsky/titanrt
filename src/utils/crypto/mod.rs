@@ -55,13 +55,11 @@ impl<'de> Deserialize<'de> for SecretValue {
             }),
             SecretValueDeserialize::Detailed { value, var_name } => {
                 let mut sv = SecretValue { value, var_name };
-                match sv.parse_value_from_env() {
-                    Ok(_) => {}
-                    Err(e) => {
+                if let Err(e) = sv.parse_value_from_env() {
+                    if sv.value.is_empty() {
                         println!("{}", e);
                     }
                 }
-
                 Ok(sv)
             }
         }
