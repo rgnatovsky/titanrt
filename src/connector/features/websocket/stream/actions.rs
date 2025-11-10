@@ -13,7 +13,6 @@ use super::message::WebSocketMessage;
 pub enum WebSocketCommand {
     Connect(WebSocketConnect),
     Send(WebSocketMessage),
-    Close(WebSocketClose),
     Ping(Bytes),
     Pong(Bytes),
     Disconnect,
@@ -30,10 +29,6 @@ impl WebSocketCommand {
 
     pub fn send_binary<B: Into<Bytes>>(message: B) -> Self {
         Self::Send(WebSocketMessage::binary(message))
-    }
-
-    pub fn close() -> WebSocketCloseBuilder {
-        WebSocketCloseBuilder::default()
     }
 
     pub fn ping<B: Into<Bytes>>(payload: B) -> Self {
@@ -128,39 +123,4 @@ pub struct WebSocketConnect {
     pub(crate) extra_protocols: Vec<String>,
     pub(crate) extra_headers: Vec<(HeaderName, HeaderValue)>,
     pub(crate) initial_messages: Vec<WebSocketMessage>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct WebSocketCloseBuilder {
-    code: Option<u16>,
-    reason: Option<String>,
-}
-
-impl WebSocketCloseBuilder {
-    pub fn code(mut self, code: u16) -> Self {
-        self.code = Some(code);
-        self
-    }
-
-    pub fn reason<S: Into<String>>(mut self, reason: S) -> Self {
-        self.reason = Some(reason.into());
-        self
-    }
-
-    pub fn build(self) -> WebSocketCommand {
-        WebSocketCommand::Close(WebSocketClose {
-            code: self.code,
-            reason: self.reason,
-        })
-    }
-
-    pub fn to_builder(self) -> StreamActionBuilder<WebSocketCommand> {
-        self.build().to_builder()
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct WebSocketClose {
-    pub(crate) code: Option<u16>,
-    pub(crate) reason: Option<String>,
 }

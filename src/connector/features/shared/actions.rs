@@ -173,6 +173,10 @@ impl<Inner> StreamActionRaw<Inner> {
         self.rl_ctx.as_ref()
     }
 
+    pub fn rl_ctx_take(&mut self) -> Option<Bytes> {
+        self.rl_ctx.take()
+    }
+
     pub fn rl_weight(&self) -> Option<usize> {
         self.rl_weight
     }

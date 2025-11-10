@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::fmt::Debug;
-use std::rc::Rc;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::connector::hook::Hook;
@@ -10,19 +11,18 @@ use bytes::Bytes;
 use crossbeam::channel::{Sender, unbounded};
 use futures::{SinkExt, StreamExt};
 use serde_json::Value;
+use tokio::net::{TcpSocket, TcpStream};
 use tokio::runtime::Builder;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::task::{LocalSet, yield_now};
 use tokio::time::{sleep, timeout};
-use tokio_tungstenite::connect_async_with_config;
+use tokio_tungstenite::client_async_with_config;
 use tokio_tungstenite::tungstenite::{
     Message,
     client::IntoClientRequest,
     http::{HeaderValue, Request, header::SEC_WEBSOCKET_PROTOCOL},
-    protocol::{CloseFrame, frame::coding::CloseCode},
 };
-use tracing::{error, warn};
 use tungstenite::protocol::WebSocketConfig;
 use uuid::Uuid;
 
@@ -33,9 +33,7 @@ use crate::connector::features::shared::events::StreamEventRaw;
 use crate::connector::features::shared::rate_limiter::RateLimitManager;
 use crate::connector::features::websocket::client::{WebSocketClient, WebSocketClientSpec};
 use crate::connector::features::websocket::connector::WebSocketConnector;
-use crate::connector::features::websocket::stream::actions::{
-    WebSocketClose, WebSocketCommand, WebSocketConnect,
-};
+use crate::connector::features::websocket::stream::actions::{WebSocketCommand, WebSocketConnect};
 use crate::connector::features::websocket::stream::descriptor::WebSocketStreamDescriptor;
 use crate::connector::features::websocket::stream::event::WebSocketEvent;
 use crate::connector::features::websocket::stream::message::WebSocketMessage;
@@ -45,7 +43,7 @@ use crate::prelude::{BaseRx, TxPairExt};
 use crate::utils::{CancelToken, Reducer, StateMarker};
 
 struct ConnectionHandle {
-    cmd_tx: UnboundedSender<WsTaskCommand>,
+    cmd_tx: UnboundedSender<(WsTaskCommand, Option<Uuid>, Option<Bytes>, Option<usize>)>,
     client_id: usize,
 }
 
@@ -56,7 +54,6 @@ enum WsTaskCommand {
     Send(WebSocketMessage),
     Ping(Bytes),
     Pong(Bytes),
-    Close(WebSocketClose),
     Disconnect,
 }
 
@@ -109,7 +106,7 @@ where
         let mut connections: ConnectionMap = AHashMap::new();
         let (res_tx, res_rx) = unbounded::<StreamEventRaw<WebSocketEvent>>();
 
-        let rl_manager = Rc::new(Mutex::new(RateLimitManager::new(
+        let rl_manager = Arc::new(Mutex::new(RateLimitManager::new(
             ctx.desc.rate_limits.clone(),
         )));
 
@@ -125,7 +122,9 @@ where
         loop {
             if ctx.cancel.is_cancelled() {
                 for handle in connections.values() {
-                    let _ = handle.cmd_tx.send(WsTaskCommand::Disconnect);
+                    let _ = handle
+                        .cmd_tx
+                        .send((WsTaskCommand::Disconnect, None, None, None));
                 }
                 ctx.health.down();
                 break Err(StreamError::Cancelled);
@@ -134,371 +133,289 @@ where
             while let Ok(mut action) = ctx.action_rx.try_recv() {
                 let command = match action.inner_take() {
                     Some(cmd) => cmd,
-                    None => continue,
-                };
-
-                let requested_conn_id = action.conn_id();
-                let req_id = action.req_id();
-                let mut label = action.label_take();
-                let payload = action.json_take();
-
-                let label_key = match label.take() {
-                    Some(l) => l.into_owned(),
                     None => {
-                        push_event(
-                            &res_tx,
-                            0,
-                            req_id,
-                            None,
-                            payload.as_ref(),
-                            WebSocketEvent::error("ws action requires label"),
-                        );
+                        res_tx
+                            .try_send(
+                                StreamEventRaw::builder(Some(WebSocketEvent::error(
+                                    "ws action requires inner",
+                                )))
+                                .conn_id(action.conn_id())
+                                .label(action.label_take())
+                                .req_id(action.req_id())
+                                .payload(action.json_take())
+                                .build()
+                                .unwrap(),
+                            )
+                            .ok();
+
                         continue;
                     }
                 };
 
-                let label_for_err = Cow::Owned(label_key.clone());
+                let label_key = match action.label_take() {
+                    Some(l) => l.into_owned(),
+                    None => {
+                        res_tx
+                            .try_send(
+                                StreamEventRaw::builder(Some(WebSocketEvent::error(
+                                    "ws action requires label",
+                                )))
+                                .conn_id(action.conn_id())
+                                .req_id(action.req_id())
+                                .payload(action.json_take())
+                                .build()
+                                .unwrap(),
+                            )
+                            .ok();
+                        continue;
+                    }
+                };
 
                 match command {
                     WebSocketCommand::Connect(connect_cfg) => {
-                        let Some(conn_id) = select_conn_id(requested_conn_id, &ctx.cfg) else {
-                            push_event(
+                        let Some(conn_id) = action
+                            .conn_id()
+                            .filter(|id| ctx.cfg.contains(id))
+                            .or_else(|| ctx.cfg.default_id())
+                            .or_else(|| ctx.cfg.sole_entry_id())
+                        else {
+                            send_error_event(
                                 &res_tx,
-                                0,
-                                req_id,
-                                Some(&label_for_err),
-                                payload.as_ref(),
-                                WebSocketEvent::error("client spec not found"),
+                                &mut action,
+                                "ws connection is not configured",
+                                None,
                             );
                             continue;
                         };
 
                         let Some(client) = ctx.cfg.get(&conn_id) else {
-                            push_event(
+                            send_error_event(
                                 &res_tx,
-                                conn_id,
-                                req_id,
-                                Some(&label_for_err),
-                                payload.as_ref(),
-                                WebSocketEvent::error("client spec not found"),
+                                &mut action,
+                                "client spec not found",
+                                Some(conn_id),
                             );
                             continue;
                         };
 
                         {
                             if let Some(existing) = connections.remove(&label_key) {
-                                let _ = existing.cmd_tx.send(WsTaskCommand::Disconnect);
+                                tracing::info!(
+                                    "disconnecting existing connection for label: {}",
+                                    label_key
+                                );
+                                let _ = existing.cmd_tx.send((
+                                    WsTaskCommand::Disconnect,
+                                    None,
+                                    None,
+                                    None,
+                                ));
                             }
                         }
 
                         let (cmd_tx, cmd_rx) = unbounded_channel();
-                        let session_res_tx = res_tx.clone();
+                        let client_cfg = client.clone();
                         let cancel = ctx.cancel.clone();
-                        let req_id_local = req_id;
-                        let label_string_for_spawn = label_key.clone();
-                        let payload_clone = payload.clone();
-                        let client_cfg = client.as_ref().clone();
+                        let session_res_tx = res_tx.clone();
+                        let error_res_tx = res_tx.clone();
+                        let rl_manager_clone = rl_manager.clone();
 
                         local.spawn_local(async move {
-                            let run_label: Option<Cow<'static, str>> =
-                                Some(Cow::Owned(label_string_for_spawn.clone()));
-                            let run_payload = payload_clone.clone();
-
+                            let label_cow = action.label_take();
+                            let payload = action.json_take();
                             if let Err(err) = run_session(
                                 conn_id,
                                 client_cfg,
                                 connect_cfg,
                                 cmd_rx,
-                                session_res_tx.clone(),
+                                session_res_tx,
                                 cancel,
-                                req_id_local,
-                                run_label,
-                                run_payload,
+                                rl_manager_clone,
+                                action.req_id(),
+                                label_cow.clone(),
+                                payload.clone(),
                             )
                             .await
                             {
-                                let label_cow = Cow::Owned(label_string_for_spawn);
-                                push_event(
-                                    &session_res_tx,
-                                    conn_id,
-                                    None,
-                                    Some(&label_cow),
-                                    payload_clone.as_ref(),
-                                    WebSocketEvent::error(format!("session error: {err}")),
+                                send_error_event(
+                                    &error_res_tx,
+                                    &mut action,
+                                    format!("connection failed: {err}"),
+                                    Some(conn_id),
                                 );
+
+                                error_res_tx
+                                    .try_send(
+                                        StreamEventRaw::builder(Some(WebSocketEvent::closed(
+                                            None,
+                                            Some(format!("connection failed internally")),
+                                        )))
+                                        .conn_id(Some(conn_id))
+                                        .req_id(action.req_id())
+                                        .label(label_cow)
+                                        .payload(payload)
+                                        .build()
+                                        .unwrap(),
+                                    )
+                                    .ok();
                             }
                         });
 
-                        {
-                            connections.insert(
-                                label_key.clone(),
-                                ConnectionHandle {
-                                    cmd_tx,
-                                    client_id: conn_id,
-                                },
-                            );
-                        }
+                        connections.insert(
+                            label_key.clone(),
+                            ConnectionHandle {
+                                cmd_tx,
+                                client_id: conn_id,
+                            },
+                        );
                     }
                     WebSocketCommand::Send(message) => {
-                        let (cmd_tx, client_id) = {
-                            match connections.get(&label_key) {
-                                Some(handle) => (handle.cmd_tx.clone(), handle.client_id),
-                                None => {
-                                    push_event(
+                        match connections.get(&label_key) {
+                            Some(handle) => {
+                                if handle
+                                    .cmd_tx
+                                    .send((
+                                        WsTaskCommand::Send(message),
+                                        action.req_id(),
+                                        action.rl_ctx_take(),
+                                        action.rl_weight(),
+                                    ))
+                                    .is_err()
+                                {
+                                    send_error_event(
                                         &res_tx,
-                                        requested_conn_id.unwrap_or(0),
-                                        req_id,
-                                        Some(&label_for_err),
-                                        payload.as_ref(),
-                                        WebSocketEvent::error("connection is not established"),
+                                        &mut action,
+                                        "cmd channel is not available",
+                                        Some(handle.client_id),
                                     );
-                                    continue;
                                 }
                             }
-                        };
-
-                        let rl_manager_clone = if action.rl_ctx().is_some() {
-                            Some(rl_manager.clone())
-                        } else {
-                            None
-                        };
-                        let rl_ctx = action.rl_ctx().cloned();
-                        let rl_weight = action.rl_weight();
-                        let res_tx_clone = res_tx.clone();
-                        let label_string_for_spawn = label_key.clone();
-                        let payload_clone = payload.clone();
-
-                        local.spawn_local(async move {
-                            if let Some(rl_mgr) = rl_manager_clone {
-                                if let Some(ctx) = rl_ctx.as_ref() {
-                                    if let Some(plan) = {
-                                        let mut mgr = rl_mgr.lock().await;
-                                        mgr.plan(ctx, rl_weight)
-                                    } {
-                                        for (bucket, weight) in plan {
-                                            bucket.wait(weight).await;
-                                        }
-                                    }
-                                }
-                            }
-
-                            if cmd_tx.send(WsTaskCommand::Send(message)).is_err() {
-                                let label_cow = Cow::Owned(label_string_for_spawn);
-                                push_event(
-                                    &res_tx_clone,
-                                    client_id,
-                                    req_id,
-                                    Some(&label_cow),
-                                    payload_clone.as_ref(),
-                                    WebSocketEvent::error("connection is not available"),
+                            None => {
+                                send_error_event(
+                                    &res_tx,
+                                    &mut action,
+                                    "connection is not established",
+                                    None,
                                 );
                             }
-                        });
+                        };
                     }
                     WebSocketCommand::Ping(bytes) => {
-                        let (cmd_tx, client_id) = {
-                            match connections.get(&label_key) {
-                                Some(handle) => (handle.cmd_tx.clone(), handle.client_id),
-                                None => {
-                                    push_event(
+                        match connections.get(&label_key) {
+                            Some(handle) => {
+                                if handle
+                                    .cmd_tx
+                                    .send((
+                                        WsTaskCommand::Ping(bytes),
+                                        action.req_id(),
+                                        action.rl_ctx_take(),
+                                        action.rl_weight(),
+                                    ))
+                                    .is_err()
+                                {
+                                    send_error_event(
                                         &res_tx,
-                                        requested_conn_id.unwrap_or(0),
-                                        req_id,
-                                        Some(&label_for_err),
-                                        payload.as_ref(),
-                                        WebSocketEvent::error("connection is not established"),
+                                        &mut action,
+                                        "cmd channel is not available",
+                                        Some(handle.client_id),
                                     );
-                                    continue;
                                 }
                             }
-                        };
-
-                        let rl_manager_clone = if action.rl_ctx().is_some() {
-                            Some(rl_manager.clone())
-                        } else {
-                            None
-                        };
-                        let rl_ctx = action.rl_ctx().cloned();
-                        let rl_weight = action.rl_weight();
-                        let res_tx_clone = res_tx.clone();
-                        let label_string_for_spawn = label_key.clone();
-                        let payload_clone = payload.clone();
-
-                        local.spawn_local(async move {
-                            if let Some(rl_mgr) = rl_manager_clone {
-                                if let Some(ctx) = rl_ctx.as_ref() {
-                                    if let Some(plan) = {
-                                        let mut mgr = rl_mgr.lock().await;
-                                        mgr.plan(ctx, rl_weight)
-                                    } {
-                                        for (bucket, weight) in plan {
-                                            bucket.wait(weight).await;
-                                        }
-                                    }
-                                }
-                            }
-
-                            if cmd_tx.send(WsTaskCommand::Ping(bytes)).is_err() {
-                                let label_cow = Cow::Owned(label_string_for_spawn);
-                                push_event(
-                                    &res_tx_clone,
-                                    client_id,
-                                    req_id,
-                                    Some(&label_cow),
-                                    payload_clone.as_ref(),
-                                    WebSocketEvent::error("connection is not available"),
+                            None => {
+                                send_error_event(
+                                    &res_tx,
+                                    &mut action,
+                                    "connection is not established",
+                                    None,
                                 );
                             }
-                        });
+                        };
                     }
                     WebSocketCommand::Pong(bytes) => {
-                        let (cmd_tx, client_id) = {
-                            match connections.get(&label_key) {
-                                Some(handle) => (handle.cmd_tx.clone(), handle.client_id),
-                                None => {
-                                    push_event(
+                        match connections.get(&label_key) {
+                            Some(handle) => {
+                                if handle
+                                    .cmd_tx
+                                    .send((
+                                        WsTaskCommand::Pong(bytes),
+                                        action.req_id(),
+                                        action.rl_ctx_take(),
+                                        action.rl_weight(),
+                                    ))
+                                    .is_err()
+                                {
+                                    send_error_event(
                                         &res_tx,
-                                        requested_conn_id.unwrap_or(0),
-                                        req_id,
-                                        Some(&label_for_err),
-                                        payload.as_ref(),
-                                        WebSocketEvent::error("connection is not established"),
+                                        &mut action,
+                                        "cmd channel is not available",
+                                        Some(handle.client_id),
                                     );
-                                    continue;
                                 }
                             }
-                        };
-
-                        let rl_manager_clone = if action.rl_ctx().is_some() {
-                            Some(rl_manager.clone())
-                        } else {
-                            None
-                        };
-                        let rl_ctx = action.rl_ctx().cloned();
-                        let rl_weight = action.rl_weight();
-                        let res_tx_clone = res_tx.clone();
-                        let label_string_for_spawn = label_key.clone();
-                        let payload_clone = payload.clone();
-
-                        local.spawn_local(async move {
-                            if let Some(rl_mgr) = rl_manager_clone {
-                                if let Some(ctx) = rl_ctx.as_ref() {
-                                    if let Some(plan) = {
-                                        let mut mgr = rl_mgr.lock().await;
-                                        mgr.plan(ctx, rl_weight)
-                                    } {
-                                        for (bucket, weight) in plan {
-                                            bucket.wait(weight).await;
-                                        }
-                                    }
-                                }
-                            }
-
-                            if cmd_tx.send(WsTaskCommand::Pong(bytes)).is_err() {
-                                let label_cow = Cow::Owned(label_string_for_spawn);
-                                push_event(
-                                    &res_tx_clone,
-                                    client_id,
-                                    req_id,
-                                    Some(&label_cow),
-                                    payload_clone.as_ref(),
-                                    WebSocketEvent::error("connection is not available"),
+                            None => {
+                                send_error_event(
+                                    &res_tx,
+                                    &mut action,
+                                    "connection is not established",
+                                    None,
                                 );
                             }
-                        });
-                    }
-                    WebSocketCommand::Close(close_cfg) => {
-                        let (cmd_tx, client_id) = {
-                            match connections.get(&label_key) {
-                                Some(handle) => (handle.cmd_tx.clone(), handle.client_id),
-                                None => {
-                                    push_event(
-                                        &res_tx,
-                                        requested_conn_id.unwrap_or(0),
-                                        req_id,
-                                        Some(&label_for_err),
-                                        payload.as_ref(),
-                                        WebSocketEvent::error("connection is not established"),
-                                    );
-                                    continue;
-                                }
-                            }
                         };
-
-                        let rl_manager_clone = if action.rl_ctx().is_some() {
-                            Some(rl_manager.clone())
-                        } else {
-                            None
-                        };
-                        let rl_ctx = action.rl_ctx().cloned();
-                        let rl_weight = action.rl_weight();
-                        let res_tx_clone = res_tx.clone();
-                        let label_string_for_spawn = label_key.clone();
-                        let payload_clone = payload.clone();
-
-                        local.spawn_local(async move {
-                            if let Some(rl_mgr) = rl_manager_clone {
-                                if let Some(ctx) = rl_ctx.as_ref() {
-                                    if let Some(plan) = {
-                                        let mut mgr = rl_mgr.lock().await;
-                                        mgr.plan(ctx, rl_weight)
-                                    } {
-                                        for (bucket, weight) in plan {
-                                            bucket.wait(weight).await;
-                                        }
-                                    }
-                                }
-                            }
-
-                            if cmd_tx.send(WsTaskCommand::Close(close_cfg)).is_err() {
-                                let label_cow = Cow::Owned(label_string_for_spawn);
-                                push_event(
-                                    &res_tx_clone,
-                                    client_id,
-                                    req_id,
-                                    Some(&label_cow),
-                                    payload_clone.as_ref(),
-                                    WebSocketEvent::error("connection is not available"),
-                                );
-                            }
-                        });
                     }
                     WebSocketCommand::Disconnect => {
-                        if let Some(handle) = connections.remove(&label_key) {
-                            let _ = handle.cmd_tx.send(WsTaskCommand::Disconnect);
-                        } else {
-                            push_event(
-                                &res_tx,
-                                0,
-                                req_id,
-                                Some(&label_for_err),
-                                payload.as_ref(),
-                                WebSocketEvent::error("connection is not established"),
-                            );
-                        }
+                        match connections.get(&label_key) {
+                            Some(handle) => {
+                                if handle
+                                    .cmd_tx
+                                    .send((WsTaskCommand::Disconnect, action.req_id(), None, None))
+                                    .is_err()
+                                {
+                                    send_error_event(
+                                        &res_tx,
+                                        &mut action,
+                                        "cmd channel is not available",
+                                        Some(handle.client_id),
+                                    );
+                                }
+                            }
+                            None => {
+                                send_error_event(
+                                    &res_tx,
+                                    &mut action,
+                                    "connection is not established",
+                                    None,
+                                );
+                            }
+                        };
                     }
                 }
             }
 
             let mut budget = ctx.desc.max_hook_calls_at_once;
+
             while budget > 0 {
                 match res_rx.try_recv() {
                     Ok(event) => {
                         budget -= 1;
-                        let remove_after = matches!(event.inner(), WebSocketEvent::Closed { .. });
-                        let label = event.label().map(|l| l.to_string());
-                        hook.call(HookArgs::new(
-                            event,
-                            &mut ctx.event_tx,
-                            &mut ctx.reducer,
-                            &ctx.state,
-                            &ctx.desc,
-                            &ctx.health,
-                        ));
-                        if remove_after {
-                            if let Some(label_key) = label {
-                                connections.remove(&label_key);
-                            }
+                        if matches!(event.inner(), WebSocketEvent::Closed { .. }) {
+                            connections.remove(event.label().unwrap());
+                            hook.call(HookArgs::new(
+                                event,
+                                &mut ctx.event_tx,
+                                &mut ctx.reducer,
+                                &ctx.state,
+                                &ctx.desc,
+                                &ctx.health,
+                            ));
+                        } else {
+                            hook.call(HookArgs::new(
+                                event,
+                                &mut ctx.event_tx,
+                                &mut ctx.reducer,
+                                &ctx.state,
+                                &ctx.desc,
+                                &ctx.health,
+                            ));
                         }
                     }
                     Err(_) => break,
@@ -516,41 +433,24 @@ where
     }
 }
 
-fn select_conn_id(
-    explicit: Option<usize>,
-    cfg: &ClientsMap<WebSocketClient, WebSocketClientSpec>,
-) -> Option<usize> {
-    explicit
-        .filter(|id| cfg.contains(id))
-        .or_else(|| cfg.default_id())
-        .or_else(|| cfg.sole_entry_id())
-}
-
-fn push_event(
-    tx: &Sender<StreamEventRaw<WebSocketEvent>>,
-    conn_id: usize,
-    req_id: Option<Uuid>,
-    label: Option<&Cow<'static, str>>,
-    payload: Option<&Value>,
-    inner: WebSocketEvent,
+fn send_error_event<E: Into<String>>(
+    res_tx: &Sender<StreamEventRaw<WebSocketEvent>>,
+    action: &mut StreamActionRaw<WebSocketCommand>,
+    error_message: E,
+    conn_id: Option<usize>,
 ) {
-    let mut builder = StreamEventRaw::builder(Some(inner)).conn_id(Some(conn_id));
-    if let Some(req_id) = req_id {
-        builder = builder.req_id(Some(req_id));
-    }
-    if let Some(label) = label {
-        builder = builder.label(Some(label.clone()));
-    }
-    if let Some(payload) = payload {
-        builder = builder.payload(Some(payload.clone()));
-    }
-
-    match builder.build() {
-        Ok(event) => {
-            let _ = tx.try_send(event);
-        }
-        Err(err) => {
-            error!(conn_id = conn_id, ?err, "unable to build websocket event");
+    match res_tx.try_send(
+        StreamEventRaw::builder(Some(WebSocketEvent::error(error_message.into())))
+            .conn_id(conn_id.or(action.conn_id()))
+            .req_id(action.req_id())
+            .label(action.label_take())
+            .payload(action.json_take())
+            .build()
+            .unwrap(),
+    ) {
+        Ok(_) => (),
+        Err(_) => {
+            tracing::error!("failed to send error event for action: {:?}", action);
         }
     }
 }
@@ -584,13 +484,6 @@ fn build_request(
     Ok(request)
 }
 
-fn message_to_ws(message: WebSocketMessage) -> Message {
-    match message {
-        WebSocketMessage::Text(text) => Message::Text(text),
-        WebSocketMessage::Binary(bytes) => Message::Binary(bytes.to_vec()),
-    }
-}
-
 async fn wait_for_cancel(token: CancelToken) {
     while !token.is_cancelled() {
         sleep(Duration::from_millis(50)).await;
@@ -599,38 +492,76 @@ async fn wait_for_cancel(token: CancelToken) {
 
 async fn run_session(
     conn_id: usize,
-    client: WebSocketClient,
+    client: Arc<WebSocketClient>,
     connect: WebSocketConnect,
-    mut cmd_rx: tokio::sync::mpsc::UnboundedReceiver<WsTaskCommand>,
+    mut cmd_rx: tokio::sync::mpsc::UnboundedReceiver<(
+        WsTaskCommand,
+        Option<Uuid>,
+        Option<Bytes>,
+        Option<usize>,
+    )>,
     res_tx: Sender<StreamEventRaw<WebSocketEvent>>,
     cancel: CancelToken,
+    rl_manager: Arc<Mutex<RateLimitManager>>,
     initial_req_id: Option<Uuid>,
     label: Option<Cow<'static, str>>,
     payload: Option<Value>,
 ) -> anyhow::Result<()> {
-    if client.local_ip.is_some() {
-        warn!(conn_id, "local ip binding is not supported yet; ignoring");
-    }
-
     let request = build_request(&client, &connect)?;
     let mut ws_cfg = WebSocketConfig::default();
     ws_cfg.max_message_size = client.max_message_size;
 
-    let connect_future = connect_async_with_config(request, Some(ws_cfg), client.tcp_nodelay);
+    // Извлекаем адрес сервера из URL
+    let url = connect
+        .override_url
+        .clone()
+        .unwrap_or_else(|| client.url.clone());
+    let host = url
+        .host_str()
+        .ok_or_else(|| anyhow!("URL must have a host"))?;
+    let port = url
+        .port_or_known_default()
+        .ok_or_else(|| anyhow!("URL must have a port"))?;
+    let server_addr: SocketAddr = format!("{}:{}", host, port)
+        .parse()
+        .map_err(|e| anyhow!("Failed to parse server address: {}", e))?;
+
+    // Создаем TcpStream с привязкой к локальному IP (если указан)
+    let tcp_stream = if let Some(local_ip) = client.local_ip {
+        let local_addr = SocketAddr::new(local_ip, 0);
+        let socket = if server_addr.is_ipv4() {
+            TcpSocket::new_v4()?
+        } else {
+            TcpSocket::new_v6()?
+        };
+        socket
+            .bind(local_addr)
+            .map_err(|e| anyhow!("Failed to bind to local address {}: {}", local_ip, e))?;
+        socket
+            .connect(server_addr)
+            .await
+            .map_err(|e| anyhow!("Failed to connect to {}: {}", server_addr, e))?
+    } else {
+        TcpStream::connect(server_addr)
+            .await
+            .map_err(|e| anyhow!("Failed to connect to {}: {}", server_addr, e))?
+    };
+
+    // Настраиваем TCP_NODELAY
+    if client.tcp_nodelay {
+        tcp_stream
+            .set_nodelay(true)
+            .map_err(|e| anyhow!("Failed to set TCP_NODELAY: {}", e))?;
+    }
+
+    // Используем client_async_with_config с готовым потоком
+    let connect_future = client_async_with_config(request, tcp_stream, Some(ws_cfg));
 
     let (mut ws_stream, response) = if let Some(connect_deadline) = client.connect_timeout {
         match timeout(connect_deadline, connect_future).await {
             Ok(result) => result?,
             Err(_) => {
-                push_event(
-                    &res_tx,
-                    conn_id,
-                    initial_req_id,
-                    label.as_ref(),
-                    payload.as_ref(),
-                    WebSocketEvent::error("connection timed out"),
-                );
-                return Ok(());
+                return Err(anyhow!("connection timed out"));
             }
         }
     } else {
@@ -643,28 +574,32 @@ async fn run_session(
         .and_then(|value| value.to_str().ok())
         .map(|s| s.to_string());
 
-    push_event(
-        &res_tx,
-        conn_id,
-        initial_req_id,
-        label.as_ref(),
-        payload.as_ref(),
-        WebSocketEvent::connected(response.status(), protocol, response.headers().clone()),
+    let _ = res_tx.try_send(
+        StreamEventRaw::builder(Some(WebSocketEvent::connected(
+            response.status(),
+            protocol,
+            response.headers().clone(),
+        )))
+        .conn_id(Some(conn_id))
+        .req_id(initial_req_id)
+        .label(label.as_ref().map(|l| l.clone()))
+        .payload(payload.as_ref().cloned())
+        .build()
+        .unwrap(),
     );
 
     for message in connect.initial_messages {
-        if let Err(err) = ws_stream.send(message_to_ws(message)).await {
-            push_event(
-                &res_tx,
-                conn_id,
-                None,
-                label.as_ref(),
-                payload.as_ref(),
-                WebSocketEvent::error(format!("failed sending initial message: {err}")),
-            );
-            break;
-        }
+        let message_to_ws = match message {
+            WebSocketMessage::Text(text) => Message::Text(text),
+            WebSocketMessage::Binary(bytes) => Message::Binary(bytes.to_vec()),
+        };
+        ws_stream.send(message_to_ws).await?;
     }
+
+    // Предвычисляем общие параметры для событий (HFT оптимизация)
+    let conn_id_opt = Some(conn_id);
+    let label_clone = label.clone();
+    let payload_clone = payload.clone();
 
     let mut closed_emitted = false;
 
@@ -676,71 +611,112 @@ async fn run_session(
             }
             maybe_cmd = cmd_rx.recv() => {
                 match maybe_cmd {
-                    Some(WsTaskCommand::Send(message)) => {
-                        if let Err(err) = ws_stream.send(message_to_ws(message)).await {
-                            push_event(
-                                &res_tx,
-                                conn_id,
-                                None,
-                                label.as_ref(),
-                                payload.as_ref(),
-                                WebSocketEvent::error(format!("send failed: {err}")),
-                            );
-                            break;
+                    Some((WsTaskCommand::Send(message), req_id, rl_ctx, rl_weight)) => {
+                        // Обработка rate limiting перед отправкой
+                        if let Some(ctx) = rl_ctx.as_ref() {
+                            if let Some(plan) = {
+                                let mut mgr = rl_manager.lock().await;
+                                mgr.plan(ctx, rl_weight)
+                            } {
+                                for (bucket, weight) in plan {
+                                    bucket.wait(weight).await;
+                                }
+                            }
                         }
-                    }
-                    Some(WsTaskCommand::Ping(bytes)) => {
-                        if let Err(err) = ws_stream.send(Message::Ping(bytes.to_vec())).await {
-                            push_event(
-                                &res_tx,
-                                conn_id,
-                                None,
-                                label.as_ref(),
-                                payload.as_ref(),
-                                WebSocketEvent::error(format!("ping failed: {err}")),
-                            );
-                            break;
-                        }
-                    }
-                    Some(WsTaskCommand::Pong(bytes)) => {
-                        if let Err(err) = ws_stream.send(Message::Pong(bytes.to_vec())).await {
-                            push_event(
-                                &res_tx,
-                                conn_id,
-                                None,
-                                label.as_ref(),
-                                payload.as_ref(),
-                                WebSocketEvent::error(format!("pong failed: {err}")),
-                            );
-                            break;
-                        }
-                    }
-                    Some(WsTaskCommand::Close(close_cfg)) => {
-                        let frame = CloseFrame {
-                            code: close_cfg
-                                .code
-                                .map(CloseCode::from)
-                                .unwrap_or(CloseCode::Normal),
-                            reason: close_cfg.reason.unwrap_or_default().into(),
+
+                        let message_to_ws = match message {
+                            WebSocketMessage::Text(text) => Message::Text(text),
+                            WebSocketMessage::Binary(bytes) => Message::Binary(bytes.to_vec()),
                         };
-                        if let Err(err) = ws_stream.send(Message::Close(Some(frame))).await {
-                            push_event(
-                                &res_tx,
-                                conn_id,
-                                None,
-                                label.as_ref(),
-                                payload.as_ref(),
-                                WebSocketEvent::error(format!("close send failed: {err}")),
+                        if ws_stream.send(message_to_ws).await.is_err() {
+                            let _ = res_tx.try_send(
+                                StreamEventRaw::builder(Some(WebSocketEvent::error(
+                                    "send failed"
+                                )))
+                                .conn_id(conn_id_opt)
+                                .req_id(req_id)
+                                .label(label_clone.clone())
+                                .payload(payload_clone.clone())
+                                .build()
+                                .unwrap(),
                             );
                             break;
                         }
                     }
-                    Some(WsTaskCommand::Disconnect) => {
+                    Some((WsTaskCommand::Ping(bytes), req_id, rl_ctx, rl_weight)) => {
+                        // Обработка rate limiting перед отправкой
+                        if let Some(ctx) = rl_ctx.as_ref() {
+                            if let Some(plan) = {
+                                let mut mgr = rl_manager.lock().await;
+                                mgr.plan(ctx, rl_weight)
+                            } {
+                                for (bucket, weight) in plan {
+                                    bucket.wait(weight).await;
+                                }
+                            }
+                        }
+
+                        if ws_stream.send(Message::Ping(bytes.to_vec())).await.is_err() {
+                            let _ = res_tx.try_send(
+                                StreamEventRaw::builder(Some(WebSocketEvent::error(
+                                    "ping failed"
+                                )))
+                                .conn_id(conn_id_opt)
+                                .req_id(req_id)
+                                .label(label_clone.clone())
+                                .payload(payload_clone.clone())
+                                .build()
+                                .unwrap(),
+                            );
+                            break;
+                        }
+                    }
+                    Some((WsTaskCommand::Pong(bytes), req_id, rl_ctx, rl_weight)) => {
+                        // Обработка rate limiting перед отправкой
+                        if let Some(ctx) = rl_ctx.as_ref() {
+                            if let Some(plan) = {
+                                let mut mgr = rl_manager.lock().await;
+                                mgr.plan(ctx, rl_weight)
+                            } {
+                                for (bucket, weight) in plan {
+                                    bucket.wait(weight).await;
+                                }
+                            }
+                        }
+
+                        if ws_stream.send(Message::Pong(bytes.to_vec())).await.is_err() {
+                            let _ = res_tx.try_send(
+                                StreamEventRaw::builder(Some(WebSocketEvent::error(
+                                    "pong failed"
+                                )))
+                                .conn_id(conn_id_opt)
+                                .req_id(req_id)
+                                .label(label_clone.clone())
+                                .payload(payload_clone.clone())
+                                .build()
+                                .unwrap(),
+                            );
+                            break;
+                        }
+                    }
+
+                    Some((WsTaskCommand::Disconnect, req_id, _, _)) => {
                         let _ = ws_stream.close(None).await;
+                        let _ = res_tx.try_send(
+                            StreamEventRaw::builder(Some(WebSocketEvent::closed(None, None)))
+                                .conn_id(conn_id_opt)
+                                .req_id(req_id)
+                                .label(label_clone.clone())
+                                .payload(payload_clone.clone())
+                                .build()
+                                .unwrap(),
+                        );
+                        closed_emitted = true;
                         break;
                     }
                     None => {
                         let _ = ws_stream.close(None).await;
+                        closed_emitted = true;
                         break;
                     }
                 }
@@ -748,80 +724,96 @@ async fn run_session(
             incoming = ws_stream.next() => {
                 match incoming {
                     Some(Ok(Message::Text(text))) => {
-                        push_event(
-                            &res_tx,
-                            conn_id,
-                            None,
-                            label.as_ref(),
-                            payload.as_ref(),
-                            WebSocketEvent::Message(WebSocketMessage::Text(text)),
+                        let _ = res_tx.try_send(
+                            StreamEventRaw::builder(Some(WebSocketEvent::Message(
+                                WebSocketMessage::Text(text),
+                            )))
+                            .conn_id(conn_id_opt)
+                            .req_id(initial_req_id)
+                            .label(label_clone.clone())
+                            .payload(payload_clone.clone())
+                            .build()
+                            .unwrap(),
                         );
                     }
                     Some(Ok(Message::Binary(data))) => {
-                        push_event(
-                            &res_tx,
-                            conn_id,
-                            None,
-                            label.as_ref(),
-                            payload.as_ref(),
-                            WebSocketEvent::Message(WebSocketMessage::Binary(Bytes::from(data))),
+                        let _ = res_tx.try_send(
+                            StreamEventRaw::builder(Some(WebSocketEvent::Message(
+                                WebSocketMessage::Binary(Bytes::from(data)),
+                            )))
+                            .conn_id(conn_id_opt)
+                            .req_id(initial_req_id)
+                            .label(label_clone.clone())
+                            .payload(payload_clone.clone())
+                            .build()
+                            .unwrap(),
                         );
                     }
                     Some(Ok(Message::Ping(data))) => {
-                        push_event(
-                            &res_tx,
-                            conn_id,
-                            None,
-                            label.as_ref(),
-                            payload.as_ref(),
-                            WebSocketEvent::Ping(Bytes::from(data)),
+                        let _ = res_tx.try_send(
+                            StreamEventRaw::builder(Some(WebSocketEvent::Ping(Bytes::from(data))))
+                                .conn_id(conn_id_opt)
+                                .req_id(initial_req_id)
+                                .label(label_clone.clone())
+                                .payload(payload_clone.clone())
+                                .build()
+                                .unwrap(),
                         );
                     }
                     Some(Ok(Message::Pong(data))) => {
-                        push_event(
-                            &res_tx,
-                            conn_id,
-                            None,
-                            label.as_ref(),
-                            payload.as_ref(),
-                            WebSocketEvent::Pong(Bytes::from(data)),
+                        let _ = res_tx.try_send(
+                            StreamEventRaw::builder(Some(WebSocketEvent::Pong(Bytes::from(data))))
+                                .conn_id(conn_id_opt)
+                                .req_id(initial_req_id)
+                                .label(label_clone.clone())
+                                .payload(payload_clone.clone())
+                                .build()
+                                .unwrap(),
                         );
                     }
                     Some(Ok(Message::Close(frame))) => {
                         let (code, reason) = frame
                             .map(|frame| (Some(frame.code.into()), Some(frame.reason.into_owned())))
                             .unwrap_or((None, None));
-                        push_event(
-                            &res_tx,
-                            conn_id,
-                            None,
-                            label.as_ref(),
-                            payload.as_ref(),
-                            WebSocketEvent::closed(code, reason),
+                        let _ = res_tx.try_send(
+                            StreamEventRaw::builder(Some(WebSocketEvent::closed(code, reason)))
+                                .conn_id(conn_id_opt)
+                                .req_id(initial_req_id)
+                                .label(label_clone.clone())
+                                .payload(payload_clone.clone())
+                                .build()
+                                .unwrap(),
                         );
                         closed_emitted = true;
                         break;
                     }
                     Some(Ok(Message::Frame(_))) => {}
-                    Some(Err(err)) => {
-                        push_event(
-                            &res_tx,
-                            conn_id,
-                            None,
-                            label.as_ref(),
-                            payload.as_ref(),
-                            WebSocketEvent::error(format!("receive failed: {err}")),
+                    Some(Err(_)) => {
+                        let _ = res_tx.try_send(
+                            StreamEventRaw::builder(Some(WebSocketEvent::error(
+                                "receive failed"
+                            )))
+                            .conn_id(conn_id_opt)
+                            .req_id(initial_req_id)
+                            .label(label_clone.clone())
+                            .payload(payload_clone.clone())
+                            .build()
+                            .unwrap(),
                         );
                         break;
                     }
                     None => {
-                        push_event(
-                            &res_tx,
-                            conn_id,
-                            None,
-                            label.as_ref(),
-                            payload.as_ref(),
-                            WebSocketEvent::closed(None, Some("stream ended".to_string())),
+                        let _ = res_tx.try_send(
+                            StreamEventRaw::builder(Some(WebSocketEvent::closed(
+                                None,
+                                Some("stream ended".to_string()),
+                            )))
+                            .conn_id(conn_id_opt)
+                            .req_id(initial_req_id)
+                            .label(label_clone.clone())
+                            .payload(payload_clone.clone())
+                            .build()
+                            .unwrap(),
                         );
                         closed_emitted = true;
                         break;
@@ -832,15 +824,18 @@ async fn run_session(
     }
 
     if !closed_emitted {
-        push_event(
-            &res_tx,
-            conn_id,
-            None,
-            label.as_ref(),
-            payload.as_ref(),
-            WebSocketEvent::closed(None, None),
+        let _ = res_tx.try_send(
+            StreamEventRaw::builder(Some(WebSocketEvent::closed(None, None)))
+                .conn_id(Some(conn_id))
+                .req_id(None)
+                .label(label.as_ref().map(|l| l.clone()))
+                .payload(payload.as_ref().cloned())
+                .build()
+                .unwrap(),
         );
     }
+
+    ws_stream.close(None).await.ok();
 
     Ok(())
 }
