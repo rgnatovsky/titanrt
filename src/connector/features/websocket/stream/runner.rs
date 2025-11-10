@@ -397,26 +397,20 @@ where
                 match res_rx.try_recv() {
                     Ok(event) => {
                         budget -= 1;
-                        if matches!(event.inner(), WebSocketEvent::Closed { .. }) {
-                            connections.remove(event.label().unwrap());
-                            hook.call(HookArgs::new(
-                                event,
-                                &mut ctx.event_tx,
-                                &mut ctx.reducer,
-                                &ctx.state,
-                                &ctx.desc,
-                                &ctx.health,
-                            ));
-                        } else {
-                            hook.call(HookArgs::new(
-                                event,
-                                &mut ctx.event_tx,
-                                &mut ctx.reducer,
-                                &ctx.state,
-                                &ctx.desc,
-                                &ctx.health,
-                            ));
+                        if let Some(label) = event.label() {
+                            if matches!(event.inner(), WebSocketEvent::Closed { .. }) {
+                                connections.remove(label);
+                            }
                         }
+
+                        hook.call(HookArgs::new(
+                            event,
+                            &mut ctx.event_tx,
+                            &mut ctx.reducer,
+                            &ctx.state,
+                            &ctx.desc,
+                            &ctx.health,
+                        ));
                     }
                     Err(_) => break,
                 }
