@@ -480,7 +480,7 @@ fn build_request(
 
 async fn wait_for_cancel(token: CancelToken) {
     while !token.is_cancelled() {
-        sleep(Duration::from_millis(50)).await;
+        sleep(Duration::from_millis(1000)).await;
     }
 }
 
@@ -598,6 +598,10 @@ async fn run_session(
     let mut closed_emitted = false;
 
     loop {
+        if cancel.is_cancelled() {
+            break;
+        }
+        
         tokio::select! {
             _ = wait_for_cancel(cancel.clone()) => {
                 let _ = ws_stream.close(None).await;
@@ -693,9 +697,7 @@ async fn run_session(
                             break;
                         }
                     }
-
                     Some((WsTaskCommand::Disconnect, req_id, _, _)) => {
-                        let _ = ws_stream.close(None).await;
                         let _ = res_tx.try_send(
                             StreamEventRaw::builder(Some(WebSocketEvent::closed(None, None)))
                                 .conn_id(conn_id_opt)
@@ -709,7 +711,6 @@ async fn run_session(
                         break;
                     }
                     None => {
-                        let _ = ws_stream.close(None).await;
                         closed_emitted = true;
                         break;
                     }
@@ -723,7 +724,6 @@ async fn run_session(
                                 WebSocketMessage::Text(text),
                             )))
                             .conn_id(conn_id_opt)
-                            .req_id(initial_req_id)
                             .label(label_clone.clone())
                             .payload(payload_clone.clone())
                             .build()
@@ -736,7 +736,6 @@ async fn run_session(
                                 WebSocketMessage::Binary(Bytes::from(data)),
                             )))
                             .conn_id(conn_id_opt)
-                            .req_id(initial_req_id)
                             .label(label_clone.clone())
                             .payload(payload_clone.clone())
                             .build()
@@ -747,7 +746,6 @@ async fn run_session(
                         let _ = res_tx.try_send(
                             StreamEventRaw::builder(Some(WebSocketEvent::Ping(Bytes::from(data))))
                                 .conn_id(conn_id_opt)
-                                .req_id(initial_req_id)
                                 .label(label_clone.clone())
                                 .payload(payload_clone.clone())
                                 .build()
@@ -758,7 +756,6 @@ async fn run_session(
                         let _ = res_tx.try_send(
                             StreamEventRaw::builder(Some(WebSocketEvent::Pong(Bytes::from(data))))
                                 .conn_id(conn_id_opt)
-                                .req_id(initial_req_id)
                                 .label(label_clone.clone())
                                 .payload(payload_clone.clone())
                                 .build()
@@ -772,7 +769,6 @@ async fn run_session(
                         let _ = res_tx.try_send(
                             StreamEventRaw::builder(Some(WebSocketEvent::closed(code, reason)))
                                 .conn_id(conn_id_opt)
-                                .req_id(initial_req_id)
                                 .label(label_clone.clone())
                                 .payload(payload_clone.clone())
                                 .build()
@@ -788,7 +784,6 @@ async fn run_session(
                                 "receive failed"
                             )))
                             .conn_id(conn_id_opt)
-                            .req_id(initial_req_id)
                             .label(label_clone.clone())
                             .payload(payload_clone.clone())
                             .build()
@@ -803,7 +798,6 @@ async fn run_session(
                                 Some("stream ended".to_string()),
                             )))
                             .conn_id(conn_id_opt)
-                            .req_id(initial_req_id)
                             .label(label_clone.clone())
                             .payload(payload_clone.clone())
                             .build()
