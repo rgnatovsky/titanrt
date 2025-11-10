@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::fmt::Debug;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -219,12 +219,19 @@ where
                             )
                             .await
                             {
-                                send_error_event(
-                                    &error_res_tx,
-                                    &mut action,
-                                    format!("connection failed: {err}"),
-                                    Some(conn_id),
-                                );
+                                error_res_tx
+                                    .try_send(
+                                        StreamEventRaw::builder(Some(WebSocketEvent::error(
+                                            format!("connection failed internally: {err}"),
+                                        )))
+                                        .conn_id(Some(conn_id))
+                                        .req_id(action.req_id())
+                                        .label(label_cow.clone())
+                                        .payload(payload.clone())
+                                        .build()
+                                        .unwrap(),
+                                    )
+                                    .ok();
 
                                 error_res_tx
                                     .try_send(
@@ -380,6 +387,11 @@ where
                     Ok(event) => {
                         budget -= 1;
                         if matches!(event.inner(), WebSocketEvent::Closed { .. }) {
+                            tracing::info!(
+                                "websocket connection closed for conn_id <{}> with label <{:?}> ",
+                                event.conn_id().unwrap(),
+                                event.label().unwrap(),
+                            );
                             connections.remove(event.label().unwrap());
                         }
 
@@ -484,13 +496,22 @@ async fn run_session(
     let port = url
         .port_or_known_default()
         .ok_or_else(|| anyhow!("URL must have a port"))?;
-    let server_addr: SocketAddr = format!("{}:{}", host, port)
-        .parse()
-        .map_err(|e| anyhow!("Failed to parse server address: {}", e))?;
+
+    let server_addr = format!("{}:{}", host, port);
+
+    let addr: SocketAddr = if let Ok(ip) = host.parse::<IpAddr>() {
+        SocketAddr::new(ip, port)
+    } else {
+        tokio::net::lookup_host(&server_addr)
+            .await
+            .map_err(|e| anyhow!("DNS lookup failed for {}: {}", server_addr, e))?
+            .next()
+            .ok_or_else(|| anyhow!("No addresses found for {}", server_addr))?
+    };
 
     let tcp_stream = if let Some(local_ip) = client.local_ip {
         let local_addr = SocketAddr::new(local_ip, 0);
-        let socket = if server_addr.is_ipv4() {
+        let socket = if addr.is_ipv4() {
             TcpSocket::new_v4()?
         } else {
             TcpSocket::new_v6()?
@@ -499,11 +520,11 @@ async fn run_session(
             .bind(local_addr)
             .map_err(|e| anyhow!("Failed to bind to local address {}: {}", local_ip, e))?;
         socket
-            .connect(server_addr)
+            .connect(addr)
             .await
             .map_err(|e| anyhow!("Failed to connect to {}: {}", server_addr, e))?
     } else {
-        TcpStream::connect(server_addr)
+        TcpStream::connect(addr)
             .await
             .map_err(|e| anyhow!("Failed to connect to {}: {}", server_addr, e))?
     };
@@ -520,6 +541,12 @@ async fn run_session(
         match timeout(connect_deadline, connect_future).await {
             Ok(result) => result?,
             Err(_) => {
+                tracing::warn!(
+                    "websocket connection timed out for conn_id <{}> with label <{:?}> to {}",
+                    conn_id,
+                    label.as_ref(),
+                    server_addr
+                );
                 return Err(anyhow!("connection timed out"));
             }
         }
@@ -562,9 +589,10 @@ async fn run_session(
     let mut closed_emitted = false;
 
     tracing::info!(
-        "running websocket stream session for conn_id <{}> with label <{:?}>",
+        "running websocket stream session for conn_id <{}> with label <{:?}> to {}",
         conn_id,
-        label_clone.as_ref()
+        label_clone.as_ref(),
+        server_addr
     );
 
     loop {
@@ -576,9 +604,10 @@ async fn run_session(
             } => {
                 let _ = ws_stream.close(None).await;
                 tracing::info!(
-                    "cancelled websocket stream session for conn_id <{}> with label <{:?}>",
+                    "cancelled websocket stream session for conn_id <{}> with label <{:?}> to {}",
                     conn_id,
-                    label_clone.as_ref()
+                    label_clone.as_ref(),
+                    server_addr
                 );
                 break;
             }
@@ -602,6 +631,12 @@ async fn run_session(
                             WebSocketMessage::Binary(bytes) => Message::Binary(bytes.to_vec()),
                         };
                         if ws_stream.send(message_to_ws).await.is_err() {
+                            tracing::warn!(
+                                "websocket send failed for conn_id <{}> with label <{:?}> to {}",
+                                conn_id,
+                                label_clone.as_ref(),
+                                server_addr
+                            );
                             let _ = res_tx.try_send(
                                 StreamEventRaw::builder(Some(WebSocketEvent::error(
                                     "send failed"
@@ -613,7 +648,6 @@ async fn run_session(
                                 .build()
                                 .unwrap(),
                             );
-                            break;
                         }
                     }
                     Some((WsTaskCommand::Ping(bytes), req_id, rl_ctx, rl_weight)) => {
@@ -630,6 +664,12 @@ async fn run_session(
                         }
 
                         if ws_stream.send(Message::Ping(bytes.to_vec())).await.is_err() {
+                            tracing::warn!(
+                                "websocket ping failed for conn_id <{}> with label <{:?}> to {}",
+                                conn_id,
+                                label_clone.as_ref(),
+                                server_addr
+                            );
                             let _ = res_tx.try_send(
                                 StreamEventRaw::builder(Some(WebSocketEvent::error(
                                     "ping failed"
@@ -641,7 +681,7 @@ async fn run_session(
                                 .build()
                                 .unwrap(),
                             );
-                            break;
+
                         }
                     }
                     Some((WsTaskCommand::Pong(bytes), req_id, rl_ctx, rl_weight)) => {
@@ -658,6 +698,12 @@ async fn run_session(
                         }
 
                         if ws_stream.send(Message::Pong(bytes.to_vec())).await.is_err() {
+                            tracing::warn!(
+                                "websocket pong failed for conn_id <{}> with label <{:?}> to {}",
+                                conn_id,
+                                label_clone.as_ref(),
+                                server_addr
+                            );
                             let _ = res_tx.try_send(
                                 StreamEventRaw::builder(Some(WebSocketEvent::error(
                                     "pong failed"
@@ -669,10 +715,15 @@ async fn run_session(
                                 .build()
                                 .unwrap(),
                             );
-                            break;
                         }
                     }
                     Some((WsTaskCommand::Disconnect, req_id, _, _)) => {
+                        tracing::info!(
+                            "websocket disconnect command received for conn_id <{}> with label <{:?}> to {}",
+                            conn_id,
+                            label_clone.as_ref(),
+                            server_addr
+                        );
                         let _ = res_tx.try_send(
                             StreamEventRaw::builder(Some(WebSocketEvent::closed(None, None)))
                                 .conn_id(conn_id_opt)
@@ -741,6 +792,14 @@ async fn run_session(
                         let (code, reason) = frame
                             .map(|frame| (Some(frame.code.into()), Some(frame.reason.into_owned())))
                             .unwrap_or((None, None));
+                        tracing::info!(
+                            "websocket close frame received for conn_id <{}> with label <{:?}> to {}: code={:?}, reason={:?}",
+                            conn_id,
+                            label_clone.as_ref(),
+                            server_addr,
+                            code,
+                            reason
+                        );
                         let _ = res_tx.try_send(
                             StreamEventRaw::builder(Some(WebSocketEvent::closed(code, reason)))
                                 .conn_id(conn_id_opt)
@@ -754,6 +813,12 @@ async fn run_session(
                     }
                     Some(Ok(Message::Frame(_))) => {}
                     Some(Err(_)) => {
+                        tracing::warn!(
+                            "websocket receive failed for conn_id <{}> with label <{:?}> to {}",
+                            conn_id,
+                            label_clone.as_ref(),
+                            server_addr
+                        );
                         let _ = res_tx.try_send(
                             StreamEventRaw::builder(Some(WebSocketEvent::error(
                                 "receive failed"
@@ -767,6 +832,12 @@ async fn run_session(
                         break;
                     }
                     None => {
+                        tracing::info!(
+                            "websocket stream ended with None for conn_id <{}> with label <{:?}> to {}",
+                            conn_id,
+                            label_clone.as_ref(),
+                            server_addr
+                        );
                         let _ = res_tx.try_send(
                             StreamEventRaw::builder(Some(WebSocketEvent::closed(
                                 None,
@@ -799,6 +870,13 @@ async fn run_session(
     }
 
     ws_stream.close(None).await.ok();
+
+    tracing::debug!(
+        "websocket stream session ended for conn_id <{}> with label <{:?}> to {}",
+        conn_id,
+        label.as_ref(),
+        server_addr
+    );
 
     Ok(())
 }
