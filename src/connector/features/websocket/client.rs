@@ -54,6 +54,8 @@ pub struct WebSocketClientSpec {
     #[serde(default)]
     pub tcp_nodelay: Option<bool>,
     #[serde(default)]
+    pub use_tls: Option<bool>,
+    #[serde(default)]
     pub ws_config: Option<WebSocketConfigSpec>,
 }
 
@@ -65,6 +67,7 @@ pub struct WebSocketClient {
     pub connect_timeout: Option<Duration>,
     pub tcp_nodelay: bool,
     pub local_ip: Option<IpAddr>,
+    pub use_tls: bool,
     pub ws_config: WebSocketConfig,
 }
 
@@ -108,6 +111,7 @@ impl ClientInitializer<WebSocketClientSpec> for WebSocketClient {
                 .map(|ms| Duration::from_millis(ms)),
             tcp_nodelay: cfg.spec.tcp_nodelay.unwrap_or(true),
             local_ip,
+            use_tls: cfg.spec.use_tls.unwrap_or(true),
             ws_config,
         })
     }

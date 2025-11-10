@@ -141,6 +141,7 @@ mod tests {
                             connect_timeout_ms: Some(10000),
                             tcp_nodelay: Some(true),
                             ws_config: None,
+                            use_tls: Some(true),
                         },
                     }],
                     fail_on_empty: false,

@@ -573,8 +573,8 @@ async fn run_session(
         label.as_ref()
     );
 
-    // Для wss:// нужно установить TLS соединение
-    let stream: tokio_tungstenite::MaybeTlsStream<TcpStream> = if url.scheme() == "wss" {
+    // Устанавливаем TLS соединение если use_tls = true
+    let stream: tokio_tungstenite::MaybeTlsStream<TcpStream> = if client.use_tls {
         tracing::info!(
             "step 2/3: establishing TLS handshake for conn_id <{}> with label <{:?}> to {}",
             conn_id,
@@ -621,6 +621,12 @@ async fn run_session(
 
         tokio_tungstenite::MaybeTlsStream::Rustls(tls_stream)
     } else {
+        tracing::debug!(
+            "step 2/3: skipping TLS (use_tls=false) for conn_id <{}> with label <{:?}> to {}",
+            conn_id,
+            label.as_ref(),
+            server_addr
+        );
         tokio_tungstenite::MaybeTlsStream::Plain(tcp_stream)
     };
 
