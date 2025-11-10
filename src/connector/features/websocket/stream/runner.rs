@@ -21,7 +21,10 @@ use tokio_tungstenite::client_async_with_config;
 use tokio_tungstenite::tungstenite::{
     Message,
     client::IntoClientRequest,
-    http::{HeaderValue, header::SEC_WEBSOCKET_PROTOCOL},
+    http::{
+        HeaderValue,
+        header::{HOST, SEC_WEBSOCKET_PROTOCOL},
+    },
 };
 use uuid::Uuid;
 
@@ -40,6 +43,9 @@ use crate::connector::{HookArgs, IntoHook, RuntimeCtx, StreamRunner, StreamSpawn
 use crate::io::ringbuffer::RingSender;
 use crate::prelude::{BaseRx, TxPairExt};
 use crate::utils::{CancelToken, Reducer, StateMarker};
+use tokio_rustls::TlsConnector;
+use tokio_rustls::rustls::pki_types::ServerName;
+use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 
 struct ConnectionHandle {
     cmd_tx: UnboundedSender<(WsTaskCommand, Option<Uuid>, Option<Bytes>, Option<usize>)>,
@@ -182,7 +188,8 @@ where
                         {
                             if let Some(existing) = connections.remove(action.label().unwrap()) {
                                 tracing::info!(
-                                    "disconnecting existing connection for label: {}",
+                                    "disconnecting existing connection for conn_id <{}> with label <{:?}>",
+                                    conn_id,
                                     action.label().unwrap()
                                 );
                                 let _ = existing.cmd_tx.send((
@@ -497,6 +504,21 @@ async fn run_session(
         .port_or_known_default()
         .ok_or_else(|| anyhow!("URL must have a port"))?;
 
+    let host_header_value = if port == 80 || port == 443 {
+        host.to_string()
+    } else {
+        format!("{}:{}", host, port)
+    };
+    headers.insert(HOST, HeaderValue::from_str(&host_header_value)?);
+
+    tracing::debug!(
+        "websocket request for conn_id <{}> with label <{:?}>: {} {}",
+        conn_id,
+        label.as_ref(),
+        request.method(),
+        request.uri()
+    );
+
     let server_addr = format!("{}:{}", host, port);
 
     let addr: SocketAddr = if let Ok(ip) = host.parse::<IpAddr>() {
@@ -508,6 +530,14 @@ async fn run_session(
             .next()
             .ok_or_else(|| anyhow!("No addresses found for {}", server_addr))?
     };
+
+    tracing::info!(
+        "step 1/3: establishing TCP connection to {} (addr: {}) for conn_id <{}> with label <{:?}>",
+        server_addr,
+        addr,
+        conn_id,
+        label.as_ref()
+    );
 
     let tcp_stream = if let Some(local_ip) = client.local_ip {
         let local_addr = SocketAddr::new(local_ip, 0);
@@ -535,11 +565,99 @@ async fn run_session(
             .map_err(|e| anyhow!("Failed to set TCP_NODELAY: {}", e))?;
     }
 
-    let connect_future = client_async_with_config(request, tcp_stream, Some(ws_cfg));
+    tracing::info!(
+        "step 1/3: TCP connection established to {} (addr: {}) for conn_id <{}> with label <{:?}>",
+        server_addr,
+        addr,
+        conn_id,
+        label.as_ref()
+    );
+
+    // Для wss:// нужно установить TLS соединение
+    let stream: tokio_tungstenite::MaybeTlsStream<TcpStream> = if url.scheme() == "wss" {
+        tracing::info!(
+            "step 2/3: establishing TLS handshake for conn_id <{}> with label <{:?}> to {}",
+            conn_id,
+            label.as_ref(),
+            server_addr
+        );
+
+        let mut root_cert_store = RootCertStore::empty();
+        for cert in rustls_native_certs::load_native_certs()
+            .map_err(|e| anyhow!("Failed to load native certificates: {}", e))?
+        {
+            root_cert_store
+                .add(cert)
+                .map_err(|e| anyhow!("Failed to add certificate: {}", e))?;
+        }
+
+        let config = Arc::new(
+            ClientConfig::builder()
+                .with_root_certificates(root_cert_store)
+                .with_no_client_auth(),
+        );
+
+        let connector = TlsConnector::from(config);
+        let domain = ServerName::try_from(host.to_string())
+            .map_err(|_| anyhow!("Invalid server name: {}", host))?;
+
+        let tls_stream = connector.connect(domain, tcp_stream).await.map_err(|e| {
+            tracing::error!(
+                "step 2/3: TLS handshake failed for conn_id <{}> with label <{:?}> to {}: {}",
+                conn_id,
+                label.as_ref(),
+                server_addr,
+                e
+            );
+            anyhow!("TLS handshake failed: {}", e)
+        })?;
+
+        tracing::info!(
+            "step 2/3: TLS handshake completed for conn_id <{}> with label <{:?}> to {}",
+            conn_id,
+            label.as_ref(),
+            server_addr
+        );
+
+        tokio_tungstenite::MaybeTlsStream::Rustls(tls_stream)
+    } else {
+        tokio_tungstenite::MaybeTlsStream::Plain(tcp_stream)
+    };
+
+    tracing::info!(
+        "step 3/3: establishing WebSocket handshake for conn_id <{}> with label <{:?}> to {}",
+        conn_id,
+        label.as_ref(),
+        server_addr
+    );
+
+    // Используем построенный request с заголовками вместо url
+    let connect_future = client_async_with_config(request, stream, Some(ws_cfg));
 
     let (mut ws_stream, response) = if let Some(connect_deadline) = client.connect_timeout {
         match timeout(connect_deadline, connect_future).await {
-            Ok(result) => result?,
+            Ok(result) => match result {
+                Ok((stream, resp)) => {
+                    tracing::info!(
+                        "step 3/3: WebSocket handshake completed for conn_id <{}> with label <{:?}> to {}: status={}",
+                        conn_id,
+                        label.as_ref(),
+                        server_addr,
+                        resp.status()
+                    );
+                    (stream, resp)
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "step 3/3: WebSocket handshake failed for conn_id <{}> with label <{:?}> to {}: {}",
+                        conn_id,
+                        label.as_ref(),
+                        server_addr,
+                        e
+                    );
+                    return Err(anyhow!("failed to connect to websocket: {e}"));
+                }
+            },
             Err(_) => {
                 tracing::warn!(
                     "websocket connection timed out for conn_id <{}> with label <{:?}> to {}",
@@ -551,7 +669,28 @@ async fn run_session(
             }
         }
     } else {
-        connect_future.await?
+        match connect_future.await {
+            Ok((stream, resp)) => {
+                tracing::info!(
+                    "step 3/3: WebSocket handshake completed for conn_id <{}> with label <{:?}> to {}: status={}",
+                    conn_id,
+                    label.as_ref(),
+                    server_addr,
+                    resp.status()
+                );
+                (stream, resp)
+            }
+            Err(e) => {
+                tracing::error!(
+                    "step 3/3: WebSocket handshake failed for conn_id <{}> with label <{:?}> to {}: {}",
+                    conn_id,
+                    label.as_ref(),
+                    server_addr,
+                    e
+                );
+                return Err(anyhow!("failed to connect to websocket: {e}"));
+            }
+        }
     };
 
     let protocol = response

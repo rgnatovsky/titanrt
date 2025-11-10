@@ -52,6 +52,8 @@ tonic = { version = "0.14.2", features = [
     "tls-native-roots",
 ], optional = true }
 rustls = { version = "0.23.31", default-features = false, features = ["ring"] }
+tokio-rustls = { version = "0.25", optional = true }
+rustls-native-certs = { version = "0.7", optional = true }
 tungstenite = { version = "0.21", default-features = false, features = [
     "rustls-tls-webpki-roots",
     "handshake",
@@ -76,7 +78,7 @@ http_conn = ["reqwest", "serde_urlencoded", "shared"]
 grpc_conn = ["tonic", "prost", "prost-types", "shared"]
 nats_bridge = ["async-nats"]
 shared = []
-ws_conn = ["tungstenite", "tokio-tungstenite", "shared"]
+ws_conn = ["tungstenite", "tokio-tungstenite", "tokio-rustls", "rustls-native-certs", "shared"]
 
 
 
