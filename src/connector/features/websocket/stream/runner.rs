@@ -21,9 +21,8 @@ use tokio_tungstenite::client_async_with_config;
 use tokio_tungstenite::tungstenite::{
     Message,
     client::IntoClientRequest,
-    http::{HeaderValue, Request, header::SEC_WEBSOCKET_PROTOCOL},
+    http::{HeaderValue, header::SEC_WEBSOCKET_PROTOCOL},
 };
-use tungstenite::protocol::WebSocketConfig;
 use uuid::Uuid;
 
 use crate::connector::errors::{StreamError, StreamResult};
@@ -115,6 +114,7 @@ where
             .enable_time()
             .build()
             .map_err(|err| StreamError::Unknown(anyhow!("Tokio runtime error: {err}")))?;
+
         let local = LocalSet::new();
 
         ctx.health.up();
@@ -134,39 +134,20 @@ where
                 let command = match action.inner_take() {
                     Some(cmd) => cmd,
                     None => {
-                        res_tx
-                            .try_send(
-                                StreamEventRaw::builder(Some(WebSocketEvent::error(
-                                    "ws action requires inner",
-                                )))
-                                .conn_id(action.conn_id())
-                                .label(action.label_take())
-                                .req_id(action.req_id())
-                                .payload(action.json_take())
-                                .build()
-                                .unwrap(),
-                            )
-                            .ok();
-
+                        send_error_event(
+                            &res_tx,
+                            &mut action,
+                            "ws action requires inner command",
+                            None,
+                        );
                         continue;
                     }
                 };
 
-                let label_key = match action.label_take() {
-                    Some(l) => l.into_owned(),
+                match action.label() {
+                    Some(_) => {}
                     None => {
-                        res_tx
-                            .try_send(
-                                StreamEventRaw::builder(Some(WebSocketEvent::error(
-                                    "ws action requires label",
-                                )))
-                                .conn_id(action.conn_id())
-                                .req_id(action.req_id())
-                                .payload(action.json_take())
-                                .build()
-                                .unwrap(),
-                            )
-                            .ok();
+                        send_error_event(&res_tx, &mut action, "ws action requires label", None);
                         continue;
                     }
                 };
@@ -199,10 +180,10 @@ where
                         };
 
                         {
-                            if let Some(existing) = connections.remove(&label_key) {
+                            if let Some(existing) = connections.remove(action.label().unwrap()) {
                                 tracing::info!(
                                     "disconnecting existing connection for label: {}",
-                                    label_key
+                                    action.label().unwrap()
                                 );
                                 let _ = existing.cmd_tx.send((
                                     WsTaskCommand::Disconnect,
@@ -219,6 +200,7 @@ where
                         let session_res_tx = res_tx.clone();
                         let error_res_tx = res_tx.clone();
                         let rl_manager_clone = rl_manager.clone();
+                        let label_clone = action.label().unwrap().to_string();
 
                         local.spawn_local(async move {
                             let label_cow = action.label_take();
@@ -262,7 +244,7 @@ where
                         });
 
                         connections.insert(
-                            label_key.clone(),
+                            label_clone,
                             ConnectionHandle {
                                 cmd_tx,
                                 client_id: conn_id,
@@ -270,7 +252,7 @@ where
                         );
                     }
                     WebSocketCommand::Send(message) => {
-                        match connections.get(&label_key) {
+                        match connections.get(action.label().unwrap()) {
                             Some(handle) => {
                                 if handle
                                     .cmd_tx
@@ -301,7 +283,7 @@ where
                         };
                     }
                     WebSocketCommand::Ping(bytes) => {
-                        match connections.get(&label_key) {
+                        match connections.get(action.label().unwrap()) {
                             Some(handle) => {
                                 if handle
                                     .cmd_tx
@@ -332,7 +314,7 @@ where
                         };
                     }
                     WebSocketCommand::Pong(bytes) => {
-                        match connections.get(&label_key) {
+                        match connections.get(action.label().unwrap()) {
                             Some(handle) => {
                                 if handle
                                     .cmd_tx
@@ -363,7 +345,7 @@ where
                         };
                     }
                     WebSocketCommand::Disconnect => {
-                        match connections.get(&label_key) {
+                        match connections.get(action.label().unwrap()) {
                             Some(handle) => {
                                 if handle
                                     .cmd_tx
@@ -397,10 +379,8 @@ where
                 match res_rx.try_recv() {
                     Ok(event) => {
                         budget -= 1;
-                        if let Some(label) = event.label() {
-                            if matches!(event.inner(), WebSocketEvent::Closed { .. }) {
-                                connections.remove(label);
-                            }
+                        if matches!(event.inner(), WebSocketEvent::Closed { .. }) {
+                            connections.remove(event.label().unwrap());
                         }
 
                         hook.call(HookArgs::new(
@@ -433,8 +413,12 @@ fn send_error_event<E: Into<String>>(
     error_message: E,
     conn_id: Option<usize>,
 ) {
+    let error_message = error_message.into();
+
+    tracing::error!("websocket error event: {error_message}");
+
     match res_tx.try_send(
-        StreamEventRaw::builder(Some(WebSocketEvent::error(error_message.into())))
+        StreamEventRaw::builder(Some(WebSocketEvent::error(error_message)))
             .conn_id(conn_id.or(action.conn_id()))
             .req_id(action.req_id())
             .label(action.label_take())
@@ -443,44 +427,12 @@ fn send_error_event<E: Into<String>>(
             .unwrap(),
     ) {
         Ok(_) => (),
-        Err(_) => {
-            tracing::error!("failed to send error event for action: {:?}", action);
+        Err(err) => {
+            tracing::error!(
+                "failed to send websocket error event for action: {:?}: {err}",
+                action
+            );
         }
-    }
-}
-
-fn build_request(
-    client: &WebSocketClient,
-    connect: &WebSocketConnect,
-) -> anyhow::Result<Request<()>> {
-    let url = connect
-        .override_url
-        .clone()
-        .unwrap_or_else(|| client.url.clone());
-    let mut request = url.into_client_request()?;
-    let headers = request.headers_mut();
-
-    for (name, value) in &client.headers {
-        headers.append(name.clone(), value.clone());
-    }
-    for (name, value) in &connect.extra_headers {
-        headers.append(name.clone(), value.clone());
-    }
-
-    let mut protocols: Vec<String> = Vec::new();
-    protocols.extend(client.protocols.iter().cloned());
-    protocols.extend(connect.extra_protocols.iter().cloned());
-    if !protocols.is_empty() {
-        let joined = protocols.join(", ");
-        headers.insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_str(&joined)?);
-    }
-
-    Ok(request)
-}
-
-async fn wait_for_cancel(token: CancelToken) {
-    while !token.is_cancelled() {
-        sleep(Duration::from_millis(1000)).await;
     }
 }
 
@@ -501,15 +453,31 @@ async fn run_session(
     label: Option<Cow<'static, str>>,
     payload: Option<Value>,
 ) -> anyhow::Result<()> {
-    let request = build_request(&client, &connect)?;
-    let mut ws_cfg = WebSocketConfig::default();
-    ws_cfg.max_message_size = client.max_message_size;
+    let ws_cfg = client.ws_config.clone();
 
-    // Извлекаем адрес сервера из URL
     let url = connect
         .override_url
         .clone()
         .unwrap_or_else(|| client.url.clone());
+
+    // Строим HTTP request для WebSocket
+    let mut request = url.clone().into_client_request()?;
+    let headers = request.headers_mut();
+
+    for (name, value) in &client.headers {
+        headers.append(name.clone(), value.clone());
+    }
+    for (name, value) in &connect.extra_headers {
+        headers.append(name.clone(), value.clone());
+    }
+
+    let mut protocols: Vec<String> = Vec::new();
+    protocols.extend(client.protocols.iter().cloned());
+    protocols.extend(connect.extra_protocols.iter().cloned());
+    if !protocols.is_empty() {
+        let joined = protocols.join(", ");
+        headers.insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_str(&joined)?);
+    }
     let host = url
         .host_str()
         .ok_or_else(|| anyhow!("URL must have a host"))?;
@@ -520,7 +488,6 @@ async fn run_session(
         .parse()
         .map_err(|e| anyhow!("Failed to parse server address: {}", e))?;
 
-    // Создаем TcpStream с привязкой к локальному IP (если указан)
     let tcp_stream = if let Some(local_ip) = client.local_ip {
         let local_addr = SocketAddr::new(local_ip, 0);
         let socket = if server_addr.is_ipv4() {
@@ -541,14 +508,12 @@ async fn run_session(
             .map_err(|e| anyhow!("Failed to connect to {}: {}", server_addr, e))?
     };
 
-    // Настраиваем TCP_NODELAY
     if client.tcp_nodelay {
         tcp_stream
             .set_nodelay(true)
             .map_err(|e| anyhow!("Failed to set TCP_NODELAY: {}", e))?;
     }
 
-    // Используем client_async_with_config с готовым потоком
     let connect_future = client_async_with_config(request, tcp_stream, Some(ws_cfg));
 
     let (mut ws_stream, response) = if let Some(connect_deadline) = client.connect_timeout {
@@ -576,7 +541,7 @@ async fn run_session(
         )))
         .conn_id(Some(conn_id))
         .req_id(initial_req_id)
-        .label(label.as_ref().map(|l| l.clone()))
+        .label(label.clone())
         .payload(payload.as_ref().cloned())
         .build()
         .unwrap(),
@@ -590,21 +555,31 @@ async fn run_session(
         ws_stream.send(message_to_ws).await?;
     }
 
-    // Предвычисляем общие параметры для событий (HFT оптимизация)
     let conn_id_opt = Some(conn_id);
     let label_clone = label.clone();
     let payload_clone = payload.clone();
 
     let mut closed_emitted = false;
 
+    tracing::info!(
+        "running websocket stream session for conn_id <{}> with label <{:?}>",
+        conn_id,
+        label_clone.as_ref()
+    );
+
     loop {
-        if cancel.is_cancelled() {
-            break;
-        }
-        
         tokio::select! {
-            _ = wait_for_cancel(cancel.clone()) => {
+            _ = async {
+                while !cancel.is_cancelled() {
+                    sleep(Duration::from_millis(1000)).await;
+                }
+            } => {
                 let _ = ws_stream.close(None).await;
+                tracing::info!(
+                    "cancelled websocket stream session for conn_id <{}> with label <{:?}>",
+                    conn_id,
+                    label_clone.as_ref()
+                );
                 break;
             }
             maybe_cmd = cmd_rx.recv() => {
